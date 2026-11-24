@@ -5,8 +5,8 @@
 S3 Browser Plus 是 [DBX](https://github.com/t8y2/dbx)（开源数据库工作台）的插件。它把 S3 兼容的对象存储——AWS S3、MinIO、Cloudflare R2、UFile、Ceph 等——变成 DBX 里的一等文件系统：浏览存储桶和目录、流式预览、上传下载大文件、目录打包 ZIP 下载、用预签名链接分享文件。
 > 本项目 fork 自 [t8y2/dbx-plugin-s3](https://github.com/t8y2/dbx-plugin-s3)（Apache-2.0），在上游基础上增强了上传体验、预览面板与连接表单等，感谢原作者。
 
-[![CI](https://github.com/xinmengzou/dbx-plugin-s3/actions/workflows/ci.yml/badge.svg)](https://github.com/xinmengzou/dbx-plugin-s3/actions/workflows/ci.yml)
-[![Release](https://img.shields.io/github/v/release/xinmengzou/dbx-plugin-s3)](https://github.com/xinmengzou/dbx-plugin-s3/releases)
+[![CI](https://github.com/xinmengzou/dbx-plugin-s3plus/actions/workflows/ci.yml/badge.svg)](https://github.com/xinmengzou/dbx-plugin-s3plus/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/xinmengzou/dbx-plugin-s3plus)](https://github.com/xinmengzou/dbx-plugin-s3plus/releases)
 [![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 
 ## 功能
@@ -122,10 +122,10 @@ go vet ./...
 cd /path/to/dbx
 npm ci --prefix plugins/sdk/dev-host
 npm run build --prefix plugins/sdk/dev-host
-cd /path/to/dbx-plugin-s3
+cd /path/to/dbx-plugin-s3plus
 DBX_PLUGIN_SDK_ROOT=/path/to/dbx \
   DBX_PLUGIN_DEV_RUNTIME=/path/to/dbx/plugins/sdk/dev-host/dist/runtime.mjs \
-  cargo run --manifest-path plugins/sdk/cli/Cargo.toml -- dev --path /path/to/dbx-plugin-s3 --port 5190
+  cargo run --manifest-path plugins/sdk/cli/Cargo.toml -- dev --path /path/to/dbx-plugin-s3plus --port 5190
 ```
 
 浏览器开发宿主不会启动 Go 边车进程；连接生命周期和最终集成测试请使用真实的 DBX 宿主。`.dbx-dev/` 存放本地开发数据，不得提交或打包。
@@ -153,7 +153,7 @@ CI 和发布构建使用同一份 `pnpm-lock.yaml`，不会在发版时重新解
 
 ## 参与贡献
 
-本插件的缺陷报告和拉取请求请提交到 [xinmengzou/dbx-plugin-s3](https://github.com/xinmengzou/dbx-plugin-s3)。不要把插件源码提交到 [t8y2/dbx](https://github.com/t8y2/dbx)；那个仓库只接受插件宿主、SDK、CLI、schema、文档和官方示例的变更。
+本插件的缺陷报告和拉取请求请提交到 [xinmengzou/dbx-plugin-s3plus](https://github.com/xinmengzou/dbx-plugin-s3plus)。不要把插件源码提交到 [t8y2/dbx](https://github.com/t8y2/dbx)；那个仓库只接受插件宿主、SDK、CLI、schema、文档和官方示例的变更。
 
 ## 安全
 

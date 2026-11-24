@@ -5,8 +5,8 @@ English | [简体中文](README.md)
 S3 Browser Plus is a plugin for [DBX](https://github.com/t8y2/dbx), the open-source database workbench. It turns S3-compatible object storage — AWS S3, MinIO, Cloudflare R2, UFile, Ceph, and more — into a first-class filesystem inside DBX: browse buckets and folders, stream previews, upload and download large objects, package folders as ZIP archives, and share files with presigned links.
 > This project is forked from [t8y2/dbx-plugin-s3](https://github.com/t8y2/dbx-plugin-s3) (Apache-2.0) with additional upload, preview, and connection-form improvements. Thanks to the original author.
 
-[![CI](https://github.com/xinmengzou/dbx-plugin-s3/actions/workflows/ci.yml/badge.svg)](https://github.com/xinmengzou/dbx-plugin-s3/actions/workflows/ci.yml)
-[![Release](https://img.shields.io/github/v/release/xinmengzou/dbx-plugin-s3)](https://github.com/xinmengzou/dbx-plugin-s3/releases)
+[![CI](https://github.com/xinmengzou/dbx-plugin-s3plus/actions/workflows/ci.yml/badge.svg)](https://github.com/xinmengzou/dbx-plugin-s3plus/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/xinmengzou/dbx-plugin-s3plus)](https://github.com/xinmengzou/dbx-plugin-s3plus/releases)
 [![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 
 ## Features
@@ -121,10 +121,10 @@ For the full loop with hot reload, run the dev host from a DBX SDK checkout:
 cd /path/to/dbx
 npm ci --prefix plugins/sdk/dev-host
 npm run build --prefix plugins/sdk/dev-host
-cd /path/to/dbx-plugin-s3
+cd /path/to/dbx-plugin-s3plus
 DBX_PLUGIN_SDK_ROOT=/path/to/dbx \
   DBX_PLUGIN_DEV_RUNTIME=/path/to/dbx/plugins/sdk/dev-host/dist/runtime.mjs \
-  cargo run --manifest-path plugins/sdk/cli/Cargo.toml -- dev --path /path/to/dbx-plugin-s3 --port 5190
+  cargo run --manifest-path plugins/sdk/cli/Cargo.toml -- dev --path /path/to/dbx-plugin-s3plus --port 5190
 ```
 
 The browser dev host does not start the Go sidecar; use the real DBX host for connection lifecycle and final integration testing. `.dbx-dev/` holds local development data and must not be committed or packaged.
@@ -148,7 +148,7 @@ The plugin repository needs no marketplace automation secrets. An optional `.dbx
 
 ## Contributing
 
-Bug reports and pull requests for this plugin belong in [xinmengzou/dbx-plugin-s3](https://github.com/xinmengzou/dbx-plugin-s3). Do not submit plugin source to [t8y2/dbx](https://github.com/t8y2/dbx); that repository accepts plugin host, SDK, CLI, schema, documentation, and official-example changes only.
+Bug reports and pull requests for this plugin belong in [xinmengzou/dbx-plugin-s3plus](https://github.com/xinmengzou/dbx-plugin-s3plus). Do not submit plugin source to [t8y2/dbx](https://github.com/t8y2/dbx); that repository accepts plugin host, SDK, CLI, schema, documentation, and official-example changes only.
 
 ## Security
 
