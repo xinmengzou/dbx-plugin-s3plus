@@ -1,0 +1,181 @@
+{
+  "$schema": "https://raw.githubusercontent.com/t8y2/dbx/main/plugins/manifest.schema.json",
+  "manifest_version": 1,
+  "id": "io.github.xinmengzou.s3plus",
+  "name": "S3 Browser Plus",
+  "version": "0.2.0",
+  "publisher": "xinmengzou",
+  "description": "S3-compatible object storage plugin for DBX.",
+  "source": "https://github.com/xinmengzou/dbx-plugin-s3",
+  "homepage": "https://github.com/xinmengzou/dbx-plugin-s3",
+  "icon": "assets/plugin.svg",
+  "permissions": ["host.events", "host.binary", "host.clipboard:read", "host.storage"],
+  "engines": {
+    "dbx": ">=0.5.68",
+    "host_api": "1"
+  },
+  "entrypoints": {
+    "backend": {
+      "executable": "bin/dbx-plugin-s3plus",
+      "transport": "stdio-framed"
+    },
+    "ui": {
+      "root": "ui",
+      "entry": "ui/index.html"
+    }
+  },
+  "contributions": [
+    {
+      "type": "connection-provider",
+      "id": "io.github.xinmengzou.s3plus.connection",
+      "label": "S3 connection",
+      "icon": "assets/plugin.svg",
+      "database_type": "s3",
+      "description": "Connect to AWS S3 or an S3-compatible object storage service.",
+      "fields": [
+        {
+          "key": "display_name",
+          "label": "Connection name",
+          "type": "text",
+          "default": "S3 connection",
+          "binding": "name",
+          "required": true
+        },
+        {
+          "key": "endpoint_protocol",
+          "label": "Endpoint protocol",
+          "type": "select",
+          "default": "https",
+          "binding": "config",
+          "required": true,
+          "description": "Keep HTTPS unless the storage only speaks plain HTTP, such as an on-premises MinIO on a trusted network.",
+          "options": [
+            { "value": "https", "label": "HTTPS" },
+            { "value": "http", "label": "HTTP" }
+          ]
+        },
+        {
+          "key": "endpoint",
+          "label": "Endpoint host",
+          "type": "text",
+          "default": "s3.amazonaws.com",
+          "binding": "config",
+          "required": true,
+          "placeholder": "oss-cn-hangzhou.aliyuncs.com",
+          "description": "Host name only — no https:// prefix and no path. Examples: Aliyun OSS oss-cn-hangzhou.aliyuncs.com; Tencent COS cos.ap-guangzhou.myqcloud.com; AWS s3.us-east-1.amazonaws.com; MinIO 192.168.1.10:9000."
+        },
+        {
+          "key": "region",
+          "label": "Region",
+          "type": "text",
+          "default": "us-east-1",
+          "binding": "config",
+          "required": false,
+          "description": "AWS region such as us-east-1. Leave empty for Aliyun OSS, Tencent COS, and MinIO — the region is already part of their endpoints; empty falls back to us-east-1."
+        },
+        {
+          "key": "base_path",
+          "label": "Base path",
+          "type": "text",
+          "default": "/",
+          "binding": "config",
+          "required": false,
+          "description": "Object prefix mapped to the DBX filesystem root; / uses the whole bucket, for example /project/assets."
+        },
+        {
+          "key": "addressing_style",
+          "label": "Addressing style",
+          "type": "select",
+          "default": "auto",
+          "binding": "config",
+          "required": true,
+          "description": "Virtual-hosted puts the bucket into the hostname (the style Aliyun OSS and Tencent COS expect); path-style keeps it in the URL path (typical for MinIO and on-premises gateways). Automatic picks per provider.",
+          "options": [
+            { "value": "auto", "label": "Automatic" },
+            { "value": "path", "label": "Path-style" },
+            { "value": "virtual", "label": "Virtual-hosted" }
+          ]
+        },
+        {
+          "key": "aws_dualstack",
+          "label": "AWS dual-stack endpoints",
+          "type": "boolean",
+          "default": false,
+          "binding": "config",
+          "required": false,
+          "description": "Opt in to AWS IPv4/IPv6 dual-stack endpoints. Disabled by default to avoid rewriting standard AWS endpoints; has no effect on other S3-compatible services."
+        },
+        {
+          "key": "bucket",
+          "label": "Bucket",
+          "type": "text",
+          "binding": "database",
+          "default": "",
+          "required": false,
+          "description": "Optional. Set a bucket name to scope this connection to that single bucket; leave empty to browse every bucket the credentials can access after connecting."
+        },
+        {
+          "key": "access_key",
+          "label": "Access key",
+          "type": "text",
+          "binding": "username",
+          "required": true
+        },
+        {
+          "key": "secret_key",
+          "label": "Secret key",
+          "type": "password",
+          "binding": "secret",
+          "required": true
+        },
+        {
+          "key": "session_token",
+          "label": "Session token",
+          "type": "password",
+          "binding": "secret",
+          "default": "",
+          "required": false,
+          "description": "Optional temporary credential token for STS or IAM roles."
+        }
+      ],
+      "workbench": "io.github.xinmengzou.s3plus.workbench",
+      "capabilities": ["test", "connect", "disconnect"]
+    },
+    {
+      "type": "workbench",
+      "id": "io.github.xinmengzou.s3plus.workbench",
+      "label": "S3 Browser Plus",
+      "description": "Browse and manage S3 objects in a custom workbench.",
+      "icon": "assets/plugin.svg"
+    }
+  ],
+  "localizations": {
+    "zh-CN": {
+      "name": "S3 Browser Plus",
+      "description": "S3 兼容对象存储插件。",
+      "contributions": {
+        "io.github.xinmengzou.s3plus.connection": {
+          "label": "S3 连接",
+          "description": "连接 AWS S3 或 S3 兼容对象存储服务。",
+          "fields": {
+            "display_name": { "label": "连接名称" },
+            "endpoint_protocol": { "label": "端点协议", "description": "内网或自建明文环境（如未配置证书的 MinIO）选择 HTTP，其余保持 HTTPS。", "options": { "https": "HTTPS", "http": "HTTP" } },
+            "endpoint": { "label": "端点主机", "placeholder": "oss-cn-hangzhou.aliyuncs.com", "description": "只填主机名（Endpoint），不带 https://、不带路径。示例：阿里云 OSS 填 oss-cn-hangzhou.aliyuncs.com；腾讯云 COS 填 cos.ap-guangzhou.myqcloud.com；AWS 填 s3.us-east-1.amazonaws.com；MinIO/自建填 192.168.1.10:9000。" },
+            "region": { "label": "区域", "description": "AWS 需填写 Region，如 us-east-1；阿里云 OSS、腾讯云 COS、MinIO 可留空（区域已包含在端点中），留空时默认 us-east-1。" },
+            "base_path": { "label": "基础路径", "description": "映射为文件系统根的对象前缀；/ 表示整个存储桶，例如 /project/assets。" },
+            "addressing_style": { "label": "寻址方式", "description": "MinIO 等自建服务建议选择 Path-style；阿里云 OSS、腾讯云 COS 建议选择 Virtual-hosted；不确定就保持自动。", "options": { "auto": "自动（推荐）", "path": "Path-style（路径式）", "virtual": "Virtual-hosted（虚拟主机式）" } },
+            "aws_dualstack": { "label": "AWS 双栈端点", "description": "启用 AWS IPv4/IPv6 双栈端点。默认关闭，避免将标准 AWS 端点改写为 dualstack；不影响其他 S3 兼容服务。" },
+            "bucket": { "label": "存储桶", "description": "可选。填写桶名则本连接只管理该桶；留空则连接后列出凭据可见的所有桶，再进入具体桶浏览。" },
+            "access_key": { "label": "访问密钥 ID" },
+            "secret_key": { "label": "访问密钥 Secret" },
+            "session_token": { "label": "会话令牌", "description": "STS 或临时 IAM 凭据的可选令牌（Session Token）。" }
+          }
+        },
+        "io.github.xinmengzou.s3plus.workbench": {
+          "label": "S3 Browser Plus",
+          "description": "在自定义工作台中浏览和管理 S3 对象。"
+        }
+      }
+    }
+  }
+}

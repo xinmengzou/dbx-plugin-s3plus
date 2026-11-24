@@ -1,0 +1,93 @@
+import { TREE_ROOT, normalizePathInput } from "./path-navigation.js";
+
+export const inlineUploadBytes = 256 * 1024;
+const chunkBytes = 1024 * 1024;
+
+export function uploadTarget(parent, file) {
+  return uploadPathTarget(parent, file.webkitRelativePath || file.name);
+}
+
+export function uploadPathTarget(parent, path) {
+  const segments = path.split("/");
+  if (segments.some((segment) => !segment || segment === "." || segment === ".." || /[\\\0]/.test(segment))) {
+    throw new Error(`Invalid upload path: ${path}`);
+  }
+  return `${parent.endsWith("/") ? parent : `${parent}/`}${segments.map(encodeURIComponent).join("/")}`;
+}
+
+// The editable draft prefilled in the upload dialog: the current folder as
+// readable text, without scheme or trailing slash ("s3://bucket/a%20b/" ->
+// "bucket/a%20b"; the dialog decodes it for display).
+export function uploadTargetDraft(uri) {
+  return String(uri || "").replace(/^s3:\/*/, "").replace(/\/+$/, "");
+}
+
+// Resolves the dialog draft into the upload base URI, percent-encoded to match
+// the entry URIs the backend returns (so the post-upload folder refresh still
+// recognizes the target). Free-roaming connections need a bucket in the draft;
+// a bucket-scoped connection may stay empty to target the bucket root.
+export function resolveUploadTarget(draft, { bucketScoped = false, scopedBucket = "" } = {}) {
+  const target = normalizePathInput(draft, { bucketScoped, scopedBucket });
+  if (target === TREE_ROOT) return bucketScoped ? TREE_ROOT : null;
+  const prefix = target.startsWith("s3://") ? "s3://" : "s3:/";
+  const segments = target.slice(prefix.length).split("/").filter(Boolean).map(encodeURIComponent);
+  return segments.length ? `${prefix}${segments.join("/")}/` : bucketScoped ? TREE_ROOT : null;
+}
+
+function checkCancelled(signal) {
+  if (signal?.aborted) throw new DOMException("Upload cancelled", "AbortError");
+}
+
+export async function uploadFile(file, { uri, invoke, sendBinary, encodeBase64, onProgress = () => {}, overwrite = false, signal }) {
+  checkCancelled(signal);
+  const parameters = { uri, contentType: file.type || "application/octet-stream", create: true, overwrite, allowNewVersion: true };
+  if (file.size <= inlineUploadBytes) {
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    checkCancelled(signal);
+    const result = await invoke("filesystem/write", { ...parameters, dataBase64: encodeBase64(bytes) }, { timeoutMs: 120000 });
+    onProgress(file.size, false);
+    return result;
+  }
+  const uploadId = globalThis.crypto?.randomUUID?.() || `upload-${Date.now()}`;
+  const opened = await invoke("filesystem/upload/open", { ...parameters, uploadId, size: file.size }, { timeoutMs: 120000 });
+  const abort = () => invoke("filesystem/upload/abort", { uploadId }, { timeoutMs: 120000 }).catch(() => undefined);
+  const onAbort = () => { void abort(); };
+  signal?.addEventListener("abort", onAbort, { once: true });
+  const waitForStatus = async (predicate, seal = false) => {
+    do {
+      checkCancelled(signal);
+      const status = await invoke("filesystem/upload/status", { uploadId, seal });
+      onProgress(status.processed, seal && !status.complete);
+      if (predicate(status)) return;
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    } while (true);
+  };
+  try {
+    checkCancelled(signal);
+    const windowBytes = Math.min(8 * chunkBytes, Math.max(chunkBytes, Number(opened.windowBytes) || chunkBytes));
+    let pendingBytes = 0;
+    for (let offset = 0; offset < file.size; offset += chunkBytes) {
+      checkCancelled(signal);
+      const end = Math.min(file.size, offset + chunkBytes);
+      const chunk = await file.slice(offset, end).arrayBuffer();
+      checkCancelled(signal);
+      await sendBinary(opened.channel, chunk);
+      pendingBytes += end - offset;
+      if (pendingBytes >= windowBytes && end < file.size) {
+        await waitForStatus((status) => status.processed >= end);
+        pendingBytes = 0;
+      }
+    }
+    await waitForStatus((status) => status.complete, true);
+    checkCancelled(signal);
+    const result = await invoke("filesystem/upload/finish", { uploadId }, { timeoutMs: 120000 });
+    onProgress(file.size, false);
+    return result;
+  } catch (cause) {
+    await abort();
+    checkCancelled(signal);
+    throw cause;
+  } finally {
+    signal?.removeEventListener("abort", onAbort);
+  }
+}

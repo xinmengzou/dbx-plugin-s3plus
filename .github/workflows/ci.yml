@@ -1,0 +1,62 @@
+name: Check DBX plugin
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  versions:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check manifest and backend versions match
+        run: |
+          manifest_version="$(node -p 'require("./manifest.json").version')"
+          backend_version="$(sed -n 's/^[[:space:]]*pluginVersion[[:space:]]*=[[:space:]]*"\(.*\)"/\1/p' backend/main.go)"
+          if [ -z "$backend_version" ]; then
+            echo "pluginVersion constant not found in backend/main.go" >&2
+            exit 1
+          fi
+          if [ "$manifest_version" != "$backend_version" ]; then
+            echo "Version mismatch: manifest.json=$manifest_version backend/main.go=$backend_version" >&2
+            exit 1
+          fi
+
+  backend:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.22.x'
+          cache-dependency-path: backend/go.sum
+      - name: Test backend
+        working-directory: backend
+        run: go test ./...
+      - name: Vet backend
+        working-directory: backend
+        run: go vet ./...
+
+  package:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          run_install: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.x'
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.22.x'
+          cache-dependency-path: backend/go.sum
+      - name: Install DBX plugin CLI
+        run: npm install --global @dbx-app/plugin-cli@0.1.6
+      - name: Package Linux candidate
+        run: pnpm install --frozen-lockfile && pnpm test && pnpm run build && dbx-plugin package . --target linux-x64

@@ -1,0 +1,1499 @@
+<script>
+  import { onDestroy, onMount, tick } from "svelte";
+  import ObjectList from "./components/ObjectList.svelte";
+  import PreviewPane from "./components/PreviewPane.svelte";
+  import FolderTree from "./components/FolderTree.svelte";
+  import { Button } from "./lib/components/ui/button/index.js";
+  import * as Dialog from "./lib/components/ui/dialog/index.js";
+  import { inlineUploadBytes, resolveUploadTarget, uploadFile, uploadPathTarget, uploadTarget, uploadTargetDraft } from "./lib/uploads.js";
+  import { collectDroppedFiles } from "./lib/drag-drop.js";
+  import { mapWithConcurrency } from "./lib/concurrency.js";
+  import { clipboardImageMarkdown, clipboardImagePath } from "./lib/clipboard-image.js";
+  import { maxDownloadBytes, readDownload, saveDownload } from "./lib/downloads.js";
+  import { formatObjectModified, formatObjectSize, prettyJsonText, sortEntriesDirectoryFirst } from "./lib/object-metadata.js";
+  import { TREE_ROOT, baseNameOfUri, displayUri, normalizePathInput as normalizePathInputFrom, parentOfUri, sameEntryUri } from "./lib/path-navigation.js";
+  import { ArrowUp, ChevronRight, ClipboardPaste, Copy, Download, FileArchive, FolderOpen, FolderPlus, FolderUp, History, Link2, ListTree, Lock, PanelRight, Pencil, RefreshCw, Search, Trash2, Upload, X } from "@lucide/svelte";
+  // The host inlines only the top-level script into the sandbox document, so
+  // dynamic imports resolve against tauri.localhost and 404; preview parsers
+  // must ship inside the main bundle.
+  import mammoth from "mammoth";
+  import * as XLSX from "xlsx";
+
+  const providerId = "io.github.xinmengzou.s3plus.files";
+  const previewLimits = { image: 4 * 1024 * 1024, video: 4 * 1024 * 1024, audio: 4 * 1024 * 1024, text: 2 * 1024 * 1024, markdown: 2 * 1024 * 1024, word: 4 * 1024 * 1024, spreadsheet: 2 * 1024 * 1024 };
+  const archiveExtensions = new Set(["7z", "bz2", "gz", "rar", "tar", "tgz", "zip"]);
+  const textExtensions = new Set(["c", "conf", "cpp", "css", "go", "h", "html", "ini", "java", "js", "json", "jsx", "log", "py", "rs", "sh", "sql", "toml", "ts", "tsx", "txt", "vue", "xml", "yaml", "yml"]);
+  const copy = {
+    en: {
+      locale: "en", size: "Size", modified: "Last modified", modifiedHint: "S3 last-modified time (upload or overwrite), shown in local time.", saving: "Saving",
+      title: "S3 object browser", path: "Path", refresh: "Refresh", up: "Up", open: "Open", empty: "This folder is empty.",
+      loading: "Loading objects…", preview: "Preview", noSelection: "Select an object to preview it.", binary: "This object cannot be previewed.", previewTooLarge: "This object is too large to preview here.", downloadTooLarge: "The current DBX host buffers downloads in memory, so files are capped at 256 MiB. A newer DBX host streams to disk with no size limit.", downloadUnavailable: "Downloads require a newer DBX host.", uploadLargeUnavailable: "Large uploads require a newer DBX host.", archiveTooLarge: "The current DBX host buffers ZIP downloads in memory, so source data is capped at 220 MiB. A newer DBX host streams with no limit.", uploading: "Uploading", downloading: "Downloading", downloadZip: "Download as ZIP", downloadZipCount: "ZIP {count} items",
+      truncated: "Preview is truncated.", error: "Error", connection: "Connection", type: "Type",
+      markdown: "Markdown", word: "Word document", spreadsheet: "Spreadsheet", sheet: "Sheet", noSheets: "No worksheets found.", noConnection: "No connection", file: "File", folder: "Folder", newFolder: "New folder", upload: "Upload", download: "Download", rename: "Rename", delete: "Delete", deleteCount: "Delete {count} items", confirm: "Confirm", cancel: "Cancel", folderName: "Folder name", newName: "New name", confirmDelete: "Delete {name}?", confirmDeleteCount: "Delete {count} items? This cannot be undone.", cannotDeleteBucket: "Buckets cannot be deleted from here.", invalidName: "Enter a valid name.", uploadLimit: "Files must be 4 MiB or smaller.", operationFailed: "Operation failed",
+      share: "Share", shareExpires: "Link validity", shareExpiresHour: "1 hour", shareExpiresDay: "24 hours", shareExpiresWeek: "7 days", copy: "Copy link", copied: "Copied", copyBlocked: "Auto-copy was blocked — the link is selected, press ⌘C / Ctrl+C to copy.", shareFailed: "Could not create the share link.",
+      folderTree: "Folder tree", previewPane: "Preview panel", expandFolder: "Expand folder", collapseFolder: "Collapse folder", loadMore: "Load more", noFolders: "No folders.", editPath: "Edit path (or double-click the path)", rootLabel: "S3", details: "Details", close: "Close", pathNotFound: "Path not found: {uri}",
+      filter: "Search by prefix", filterHint: "Search the current folder only: match folders and files by name prefix (bucket names at the root list), e.g. docs/2024/report. Case-sensitive; navigating to another folder clears the search.", noMatch: "No files match this prefix.", clearFilter: "Clear filter", clipboardUpload: "Upload clipboard image", clipboardUnavailable: "Clipboard image upload requires a newer DBX desktop host.", clipboardEmpty: "The clipboard does not contain an image.", clipboardUploaded: "Clipboard image uploaded", clipboardMarkdown: "Markdown", clipboardLinkExpires: "The generated link is valid for 24 hours.",
+      copyPath: "Copy path", copyLabel: "Copy", absolutePath: "Absolute path", relativePath: "Relative path (without bucket)", overwriteTitle: "Overwrite file", confirmOverwrite: "{name} already exists. Overwrite it?", confirmOverwriteHint: "Unless the bucket has versioning enabled, the previous content is replaced and cannot be restored.", overwrite: "Overwrite",
+      readOnlyMode: "Read-only", readOnlyTitle: "This connection is marked read-only in DBX; uploads, deletes, renames, and folder creation are disabled.",
+      uploadFolder: "Upload folder", folderUploadHint: "Preserves the selected folder and nested files. Empty folders are omitted by the browser.", uploadCancelled: "Upload cancelled. Completed files are kept.", confirmingUpload: "Waiting for storage confirmation…", versions: "Versions", noVersions: "No versions found.", latestVersion: "Latest", deletedVersion: "Delete marker", versionsTruncated: "Showing the first 1,000 versions.", versionUploadHint: "Same-name uploads create a new version when bucket versioning is enabled; otherwise you will be asked whether to overwrite.",
+      dropUpload: "Drop files or folders here to upload", overwriteAll: "Overwrite all", skipFile: "Skip", skipAll: "Skip all", uploadQueue: "Upload queue", uploadFinished: "Upload finished: {done} succeeded, {skipped} skipped, {failed} failed.", statusPending: "Pending", statusDone: "Done", statusFailed: "Failed", statusSkipped: "Skipped", statusCancelled: "Cancelled",
+      uploadTo: "Upload to", selectedFiles: "{count} files · {size}", uploadTargetRequired: "Enter a target path starting with the bucket name.", uploadTargetHint: "Missing folders are created automatically, so the path may point anywhere in the bucket.",
+    },
+    zh: {
+      locale: "zh-CN", size: "大小", modified: "修改时间", modifiedHint: "S3 最后修改时间（上传或覆盖），按本地时区显示。", saving: "正在保存",
+      title: "S3 对象浏览器", path: "路径", refresh: "刷新", up: "上级", open: "打开", empty: "此目录为空。",
+      loading: "正在加载对象…", preview: "预览", noSelection: "选择一个对象以预览。", binary: "此对象无法预览。", previewTooLarge: "对象过大，已跳过预览。", downloadTooLarge: "当前 DBX 版本需要把下载完整读入内存，因此上限为 256 MiB；升级到更新版本的 DBX 后会自动改为流式落盘，不再有大小限制。", downloadUnavailable: "当前 DBX 宿主不支持下载。", uploadLargeUnavailable: "当前 DBX 宿主不支持大文件上传。", archiveTooLarge: "当前 DBX 版本需要把打包结果完整读入内存，因此源数据上限为 220 MiB；升级到更新版本的 DBX 后会自动解除限制。", uploading: "正在上传", downloading: "正在下载", downloadZip: "下载为 ZIP", downloadZipCount: "打包 {count} 项",
+      truncated: "预览内容已截断。", error: "错误", connection: "连接", type: "类型",
+      markdown: "Markdown", word: "Word 文档", spreadsheet: "电子表格", sheet: "工作表", noSheets: "未找到工作表。", noConnection: "未连接", file: "文件", folder: "文件夹", newFolder: "新建文件夹", upload: "上传", download: "下载", rename: "重命名", delete: "删除", deleteCount: "删除 {count} 项", confirm: "确定", cancel: "取消", folderName: "文件夹名称", newName: "新名称", confirmDelete: "确定删除 {name} 吗？", confirmDeleteCount: "确定删除 {count} 项吗？删除后无法恢复。", cannotDeleteBucket: "不支持在此删除存储桶。", invalidName: "请输入有效名称。", uploadLimit: "文件不能超过 4 MiB。", operationFailed: "操作失败",
+      share: "分享", shareExpires: "链接有效期", shareExpiresHour: "1 小时", shareExpiresDay: "24 小时", shareExpiresWeek: "7 天", copy: "复制链接", copied: "已复制", copyBlocked: "自动复制被拦截,已全选链接,请按 ⌘C / Ctrl+C 复制。", shareFailed: "生成分享链接失败。",
+      folderTree: "目录树", previewPane: "预览面板", expandFolder: "展开文件夹", collapseFolder: "折叠文件夹", loadMore: "加载更多", noFolders: "暂无文件夹。", editPath: "编辑路径（或双击路径栏）", rootLabel: "S3", details: "详细信息", close: "关闭", pathNotFound: "未找到路径：{uri}",
+      filter: "按前缀搜索", filterHint: "只搜索当前文件夹：按名称前缀匹配文件夹和文件（桶列表页匹配桶名），例如输入 docs/2024/report。区分大小写，切换目录时自动清除。", noMatch: "没有匹配该前缀的文件。", clearFilter: "清除筛选", clipboardUpload: "上传剪贴板图片", clipboardUnavailable: "剪贴板图片上传需要更新版本的 DBX 桌面端。", clipboardEmpty: "剪贴板中没有图片。", clipboardUploaded: "剪贴板图片已上传", clipboardMarkdown: "Markdown", clipboardLinkExpires: "生成的链接有效期为 24 小时。",
+      copyPath: "复制路径", copyLabel: "复制", absolutePath: "绝对路径", relativePath: "相对路径（不含桶）", overwriteTitle: "覆盖文件", confirmOverwrite: "文件「{name}」已存在，确定覆盖吗？", confirmOverwriteHint: "桶未开启版本管理时，覆盖后原内容无法恢复。", overwrite: "覆盖",
+      readOnlyMode: "只读", readOnlyTitle: "此连接已在 DBX 中标记为只读，上传、删除、重命名和新建文件夹已被禁用。",
+      uploadFolder: "上传文件夹", folderUploadHint: "保留所选文件夹及嵌套文件的路径。浏览器不会包含空文件夹。", uploadCancelled: "上传已取消，已完成的文件会保留。", confirmingUpload: "等待存储服务确认…", versions: "版本历史", noVersions: "未找到历史版本。", latestVersion: "最新", deletedVersion: "删除标记", versionsTruncated: "仅显示前 1,000 个版本。", versionUploadHint: "同名上传在存储桶启用版本管理时自动创建新版本，否则会询问是否覆盖。",
+      dropUpload: "松开鼠标，上传文件或文件夹", overwriteAll: "全部覆盖", skipFile: "跳过", skipAll: "全部跳过", uploadQueue: "上传队列", uploadFinished: "上传完成：成功 {done} 个，跳过 {skipped} 个，失败 {failed} 个。", statusPending: "等待中", statusDone: "完成", statusFailed: "失败", statusSkipped: "已跳过", statusCancelled: "已取消",
+      uploadTo: "上传至", selectedFiles: "{count} 个文件 · {size}", uploadTargetRequired: "请输入以桶名开头的目标路径。", uploadTargetHint: "目录不存在时会自动创建，可填写桶内任意路径。",
+    },
+  };
+
+  let text = $state(copy.en);
+  let context = $state({});
+  let entries = $state([]);
+  let currentUri = $state("s3:/");
+  let nextCursor = $state("");
+  let bucketMode = $state(false);
+  let readOnly = $state(false);
+  let selected = $state(null);
+  let preview = $state({ kind: "empty", value: "", type: "", truncated: false });
+  let entryMetadata = $state(null);
+  let loading = $state(false);
+  let operating = $state(false);
+  let error = $state("");
+  let notice = $state("");
+  let dragDepth = $state(0);
+  let uploadQueue = $state([]);
+  let uploadPanelOpen = $state(false);
+  let uploadSeq = 0;
+  let checkedUris = $state([]);
+  let transfer = $state(null);
+  let leftWidth = $state(42);
+  let treeNodes = $state({});
+  let treeVisible = $state(false);
+  let treeWidth = $state(192);
+  let previewCollapsed = $state(false);
+  let filterQuery = $state("");
+  let filterTimer;
+  let pendingLoadUri = "";
+  let pathEditing = $state(false);
+  let pathDraft = $state("");
+  let pathInput = $state(null);
+  // A connection pinned to one bucket takes bucket-less pasted paths as key
+  // paths; bucket-listing connections treat the first segment as the bucket.
+  let bucketScoped = $state(false);
+  let scopedBucket = $state("");
+  // Bumping this object asks the object list to scroll a row into view.
+  let focusTarget = $state(null);
+  let focusSeq = 0;
+  let uploadInput = $state(null);
+  let folderUploadInput = $state(null);
+  let uploadTargetInput = $state(null);
+  // Files chosen through the picker or a drop await the upload dialog's
+  // target path.
+  let pendingUpload = $state(null);
+  let uploadController;
+  let downloadController;
+  let dialog = $state(null);
+  let dialogOpen = $state(false);
+  let contextMenu = $state(null);
+  let shareCopied = $state(false);
+  let shareCopyBlocked = $state(false);
+  let shareUrlInput = $state(null);
+  let absolutePathInput = $state(null);
+  let relativePathInput = $state(null);
+  let clipboardUrlInput = $state(null);
+  let clipboardMarkdownInput = $state(null);
+  let previewRequest = 0;
+  let previewReader;
+  let previewMediaToken = "";
+  let shareRequest = 0;
+
+  const shareExpiryOptions = $derived([
+    { value: 3600, label: text.shareExpiresHour },
+    { value: 86400, label: text.shareExpiresDay },
+    { value: 604800, label: text.shareExpiresWeek },
+  ]);
+
+  const connectionId = () => context?.connectionId || "";
+  const isZh = () => (window.dbxPlugin?.locale || "en").toLowerCase().startsWith("zh");
+  const decode = (value) => window.dbxPlugin.decodeBase64(value);
+
+  // Layout prefs persist through host.storage when the host offers it; every
+  // access is defensive so a missing capability only loses the convenience.
+  const canPersistUi = () => !!window.dbxPlugin?.capabilities?.storage && typeof window.dbxPlugin?.storage?.get === "function" && typeof window.dbxPlugin?.storage?.set === "function";
+  async function loadUiPrefs() {
+    if (!canPersistUi()) return;
+    try {
+      const raw = await window.dbxPlugin.storage.get("ui.layout");
+      const prefs = typeof raw === "string" ? JSON.parse(raw) : raw;
+      if (!prefs || typeof prefs !== "object") return;
+      if (Number.isFinite(prefs.leftWidth)) leftWidth = Math.min(70, Math.max(24, prefs.leftWidth));
+      if (Number.isFinite(prefs.treeWidth)) treeWidth = Math.min(420, Math.max(140, prefs.treeWidth));
+      if (typeof prefs.treeVisible === "boolean") treeVisible = prefs.treeVisible;
+      if (typeof prefs.previewCollapsed === "boolean") previewCollapsed = prefs.previewCollapsed;
+    } catch { /* unreadable prefs: keep defaults */ }
+  }
+  function saveUiPrefs() {
+    if (!canPersistUi()) return;
+    try {
+      const result = window.dbxPlugin.storage.set("ui.layout", JSON.stringify({ leftWidth, previewCollapsed, treeVisible, treeWidth }));
+      if (result?.catch) result.catch(() => undefined);
+    } catch { /* storage unavailable */ }
+  }
+
+  function treeAncestors(uri) {
+    const parts = uri.replace(/^s3:\/*/, "").split("/").filter(Boolean);
+    const ancestors = [TREE_ROOT];
+    let accumulated = "s3://";
+    for (const part of parts) {
+      accumulated += `${part}/`;
+      ancestors.push(accumulated);
+    }
+    return ancestors;
+  }
+
+  function treeNode(uri) {
+    treeNodes[uri] ||= { open: false, loaded: false, loading: false, children: [], nextCursor: "" };
+    return treeNodes[uri];
+  }
+
+  // Tree children come from a directories-only listing: the sidecar skips
+  // files server-side, so one request returns a full page of folders no
+  // matter how many files sit between them.
+  async function loadTreeChildren(uri, startCursor = "") {
+    const node = treeNode(uri);
+    if (node.loading) return;
+    node.loading = true;
+    if (!startCursor) {
+      node.children = [];
+      node.nextCursor = "";
+    }
+    try {
+      const result = await invoke("filesystem/list", { uri, cursor: startCursor || undefined, limit: 1000, directoriesOnly: true });
+      if (treeNodes[uri] !== node) return;
+      const folders = (result?.entries || []).filter((entry) => entry.kind === "directory" || entry.kind === "bucket");
+      node.children = startCursor ? [...(node.children || []), ...folders] : folders;
+      node.nextCursor = result?.nextCursor || "";
+      node.loaded = true;
+    } catch {
+      // The object list surfaces listing errors; the tree is a secondary view
+      // and degrades to the folders gathered so far.
+      node.loaded = true;
+    } finally {
+      node.loading = false;
+    }
+  }
+
+  function toggleTreeNode(uri) {
+    const node = treeNode(uri);
+    node.open = !node.open;
+    // Re-expansions reuse the cached children; operations refresh open nodes.
+    if (node.open && !node.loaded && !node.loading) void loadTreeChildren(uri);
+  }
+
+  function continueTrees() {
+    // Scroll-to-bottom continuation: pull the next folder batch for every
+    // expanded node that still has a cursor.
+    for (const [uri, node] of Object.entries(treeNodes)) {
+      if (node.open && node.nextCursor && !node.loading) void loadTreeChildren(uri, node.nextCursor);
+    }
+  }
+
+  function selectTreeNode(uri) {
+    void load(uri);
+  }
+
+  async function expandTreePath(uri) {
+    const ancestors = treeAncestors(uri);
+    // Open every level above the target folder first so the spinner shows
+    // while slow listings load, never the target itself.
+    for (const ancestor of uri === TREE_ROOT ? ancestors : ancestors.slice(0, -1)) {
+      const node = treeNode(ancestor);
+      node.open = true;
+      if (!node.loaded && !node.loading) await loadTreeChildren(ancestor);
+    }
+  }
+
+  async function refreshOpenTree() {
+    for (const [uri, node] of Object.entries(treeNodes)) {
+      if (node.open && !node.loading) void loadTreeChildren(uri);
+    }
+  }
+
+  const breadcrumbs = $derived.by(() => {
+    const parts = currentUri.replace(/^s3:\/*/, "").split("/").filter(Boolean);
+    const crumbs = [{ uri: TREE_ROOT, name: text.rootLabel }];
+    let accumulated = "s3://";
+    for (const part of parts) {
+      accumulated += `${part}/`;
+      crumbs.push({ uri: accumulated, name: decodeURIComponent(part) });
+    }
+    return crumbs;
+  });
+  const extension = (name) => name.split(".").pop()?.toLowerCase() || "";
+  const mimeByExtension = {
+    aac: "audio/aac", avif: "image/avif", bmp: "image/bmp", csv: "text/csv", docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    flac: "audio/flac", gif: "image/gif", jpeg: "image/jpeg", jpg: "image/jpeg", m4a: "audio/mp4", m4v: "video/x-m4v", md: "text/markdown",
+    mov: "video/quicktime", mp3: "audio/mpeg", mp4: "video/mp4", mpeg: "video/mpeg", oga: "audio/ogg", ogg: "audio/ogg", png: "image/png",
+    weba: "audio/webm", webm: "video/webm", webp: "image/webp", wav: "audio/wav", xls: "application/vnd.ms-excel", xlsb: "application/vnd.ms-excel.sheet.binary.macroEnabled.12",
+    xlsm: "application/vnd.ms-excel.sheet.macroEnabled.12", xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  };
+  const normalizedType = (entry, result) => {
+    const declared = (result?.contentType || entry?.contentType || "application/octet-stream").split(";", 1)[0].toLowerCase();
+    return declared === "application/octet-stream" ? (mimeByExtension[extension(entry?.name || "")] || declared) : declared;
+  };
+  const previewKind = (entry, type = normalizedType(entry)) => {
+    const ext = extension(entry?.name || "");
+    if (archiveExtensions.has(ext) || type === "application/pdf") return "binary";
+    if (type.startsWith("image/") || ["avif", "bmp", "gif", "jpeg", "jpg", "png", "webp"].includes(ext)) return "image";
+    if (type.startsWith("video/") || ["m4v", "mov", "mp4", "mpeg", "webm"].includes(ext)) return "video";
+    if (type.startsWith("audio/") || ["aac", "flac", "m4a", "mp3", "ogg", "wav", "weba"].includes(ext)) return "audio";
+    if (ext === "docx" || type.includes("wordprocessingml.document")) return "word";
+    if (["csv", "xls", "xlsb", "xlsm", "xlsx"].includes(ext) || type === "text/csv" || type.includes("spreadsheet") || type.includes("excel")) return "spreadsheet";
+    if (["md", "markdown"].includes(ext)) return "markdown";
+    if (type.startsWith("text/") || ["application/json", "application/javascript", "application/xml"].includes(type) || textExtensions.has(ext)) return "text";
+    return "binary";
+  };
+  // One HEAD per selection powers the details card, including for objects
+  // that cannot be previewed; failures leave the card with listing data only.
+  async function loadEntryMetadata(uri, requestId) {
+    try {
+      const metadata = await invoke("filesystem/stat", { uri });
+      if (requestId === previewRequest && selected?.uri === uri) entryMetadata = metadata;
+    } catch {
+      // Supplementary data only; the preview itself must not fail on this.
+    }
+  }
+
+  async function invoke(method, params, options = {}) {
+    return window.dbxPlugin.invoke(method, { ...params, connectionId: connectionId(), providerId }, options);
+  }
+
+  function scheduleFilter(value) {
+    filterQuery = value;
+    clearTimeout(filterTimer);
+    filterTimer = setTimeout(() => {
+      filterTimer = undefined;
+      void load(currentUri);
+    }, 180);
+  }
+
+  async function readStream(reader, onProgress) {
+    const chunks = [];
+    let total = 0;
+    try {
+      while (true) {
+        const result = await reader.read();
+        if (result.done) break;
+        chunks.push(result.value);
+        total += result.value.byteLength;
+        onProgress?.(total);
+      }
+    } finally {
+      if (previewReader === reader) previewReader = undefined;
+    }
+    const bytes = new Uint8Array(total);
+    let offset = 0;
+    for (const chunk of chunks) {
+      bytes.set(chunk, offset);
+      offset += chunk.byteLength;
+    }
+    return bytes;
+  }
+
+  async function readPreview(uri, maxBytes) {
+    if (typeof window.dbxPlugin?.stream !== "function") {
+      const result = await invoke("filesystem/read", { uri, maxBytes }, { timeoutMs: 120000 });
+      return { bytes: decode(result.dataBase64), metadata: result };
+    }
+    const opened = await window.dbxPlugin.stream("filesystem/stream/open", { uri, maxBytes, connectionId: connectionId(), providerId }, { timeoutMs: 120000 });
+    previewReader = opened.stream.getReader();
+    return { bytes: await readStream(previewReader), metadata: opened.metadata || {} };
+  }
+
+  async function load(uri = currentUri, append = false) {
+    if (!connectionId() || (append && !nextCursor)) return;
+    // A prefix search belongs to the folder it was typed in; carrying it
+    // into another folder makes every directory look empty. Console-style
+    // behavior: navigating resets the search, refreshing keeps it.
+    if (uri !== currentUri) filterQuery = "";
+    if (loading) {
+      if (!append) pendingLoadUri = uri;
+      return;
+    }
+    loading = true;
+    error = "";
+    notice = "";
+    try {
+      const result = await invoke("filesystem/list", { uri, cursor: append ? nextCursor : undefined, limit: 200, filter: filterQuery.trim() || undefined });
+      const incoming = result?.entries || [];
+      if (append) {
+        const existingUris = new Set(entries.map((entry) => entry.uri));
+        entries = sortEntriesDirectoryFirst([...entries, ...incoming.filter((candidate) => !existingUris.has(candidate.uri))]);
+      } else {
+        entries = sortEntriesDirectoryFirst(incoming);
+      }
+      currentUri = uri;
+      nextCursor = result?.nextCursor || "";
+      if (!append) {
+        bucketMode = !!result?.bucketMode;
+        readOnly = !!result?.readOnly;
+        if (uri === TREE_ROOT) {
+          // The root listing reveals the connection shape: buckets mean a
+          // free-roaming connection, keys mean the bucket is pinned.
+          bucketScoped = !bucketMode;
+          if (!bucketScoped) scopedBucket = "";
+          else if (entries[0]) scopedBucket = entries[0].uri.split("/")[2] || scopedBucket;
+        }
+        checkedUris = [];
+        clearPreview();
+        void expandTreePath(uri);
+      }
+      return result;
+    } catch (cause) {
+      error = cause?.message || String(cause);
+    } finally {
+      loading = false;
+      if (pendingLoadUri) {
+        const pendingUri = pendingLoadUri;
+        pendingLoadUri = "";
+        void load(pendingUri);
+      }
+    }
+  }
+
+  async function selectEntry(entry) {
+    contextMenu = null;
+    const requestId = ++previewRequest;
+    releasePreviewUrl();
+    await previewReader?.cancel();
+    previewReader = undefined;
+    selected = entry;
+    entryMetadata = null;
+    // A collapsed pane shows nothing, so skip the preview work entirely;
+    // expanding re-selects the current row to load it.
+    if (previewCollapsed) return;
+    if (entry.kind === "directory" || entry.kind === "bucket") {
+      preview = { kind: "empty", value: "", type: text.folder, truncated: false };
+      return;
+    }
+    void loadEntryMetadata(entry.uri, requestId);
+    const type = normalizedType(entry);
+    const kind = previewKind(entry, type);
+    if (kind === "binary") {
+      preview = { kind, value: "", type, truncated: false };
+      return;
+    }
+    if ((kind === "video" || kind === "audio") && window.dbxPlugin?.capabilities?.mediaUrl && typeof window.dbxPlugin?.media?.open === "function") {
+      preview = { kind: "loading", value: "", type, truncated: false };
+      try {
+        const media = await window.dbxPlugin.media.open("filesystem/media/read", { uri: entry.uri, connectionId: connectionId(), providerId });
+        if (requestId !== previewRequest) {
+          void window.dbxPlugin.media.close(media.token);
+          return;
+        }
+        previewMediaToken = media.token;
+        preview = { kind, value: media.url, type, truncated: false };
+      } catch (cause) {
+        if (requestId === previewRequest) preview = { kind: "error", value: cause?.message || String(cause), type, truncated: false };
+      }
+      return;
+    }
+    const maxBytes = previewLimits[kind];
+    if (Number.isFinite(entry.size) && entry.size > maxBytes) {
+      preview = { kind: "binary", value: "", type, truncated: true, message: text.previewTooLarge };
+      return;
+    }
+    preview = { kind: "loading", value: "", type: "", truncated: false };
+    try {
+      const loaded = await readPreview(entry.uri, maxBytes);
+      const bytes = loaded.bytes;
+      if (requestId !== previewRequest) return;
+      const result = loaded.metadata;
+      const resultType = normalizedType(entry, result);
+      if (result.truncated && ["image", "video", "audio", "word", "spreadsheet"].includes(kind)) {
+        preview = { kind: "binary", value: "", type: resultType, truncated: true };
+      } else if (kind === "image") {
+        preview = { kind, value: URL.createObjectURL(new Blob([bytes], { type: resultType })), type: resultType, truncated: !!result.truncated };
+      } else if (kind === "video") {
+        preview = { kind, value: URL.createObjectURL(new Blob([bytes], { type: resultType })), type: resultType, truncated: !!result.truncated };
+      } else if (kind === "audio") {
+        preview = { kind, value: URL.createObjectURL(new Blob([bytes], { type: resultType })), type: resultType, truncated: !!result.truncated };
+      } else if (kind === "word") {
+        const word = await mammoth.extractRawText({ arrayBuffer: bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) });
+        if (requestId !== previewRequest) return;
+        preview = { kind: "text", value: word.value, type: text.word, truncated: !!result.truncated };
+      } else if (kind === "spreadsheet") {
+        const workbook = XLSX.read(bytes, { type: "array", cellDates: true });
+        const sheets = workbook.SheetNames.map((name) => {
+          const rows = XLSX.utils.sheet_to_json(workbook.Sheets[name], { header: 1, defval: "", raw: false });
+          const visibleRows = rows.slice(0, 500).map((row) => row.slice(0, 50));
+          const columnCount = visibleRows.reduce((count, row) => Math.max(count, row.length), 0);
+          return { name, rows: visibleRows, truncated: rows.length > 500 || rows.some((row) => row.length > 50), columnCount };
+        });
+        if (requestId !== previewRequest) return;
+        preview = { kind: "spreadsheet", value: "", type: text.spreadsheet, sheets, sheetIndex: 0, truncated: !!result.truncated || sheets.some((sheet) => sheet.truncated) };
+      } else if (kind === "markdown" || kind === "text") {
+        let value = new TextDecoder().decode(bytes);
+        if (kind === "text" && (resultType === "application/json" || extension(entry.name) === "json")) value = prettyJsonText(value);
+        preview = { kind, value, type: kind === "markdown" ? text.markdown : resultType, truncated: !!result.truncated };
+      }
+    } catch (cause) {
+      if (requestId === previewRequest) preview = { kind: "error", value: cause?.message || String(cause), type: "", truncated: false };
+    }
+  }
+
+  function openEntry(entry) {
+    contextMenu = null;
+    if (entry.kind === "directory" || entry.kind === "bucket") void load(entry.uri);
+    else if (previewCollapsed) { previewCollapsed = false; saveUiPrefs(); void selectEntry(entry); }
+  }
+
+  function openContextMenu(event, entry) {
+    if (operating) return;
+    const menuWidth = 180;
+    const menuHeight = 184;
+    contextMenu = {
+      entry,
+      x: Math.max(8, Math.min(event.clientX, window.innerWidth - menuWidth - 8)),
+      y: Math.max(8, Math.min(event.clientY, window.innerHeight - menuHeight - 8)),
+    };
+  }
+
+  function childUri(parent, name, directory = false) {
+    const base = parent.endsWith("/") ? parent : `${parent}/`;
+    return `${base}${encodeURIComponent(name)}${directory ? "/" : ""}`;
+  }
+
+  function beginPathEdit(seed = currentUri) {
+    pathDraft = seed;
+    pathEditing = true;
+    void tick().then(() => { pathInput?.focus(); pathInput?.select(); });
+  }
+
+  function cancelPathEdit() {
+    pathEditing = false;
+  }
+
+  const normalizePathInput = (raw) => normalizePathInputFrom(raw, { bucketScoped, scopedBucket });
+
+  async function commitPathEdit() {
+    if (!pathEditing) return;
+    const draft = pathDraft;
+    pathEditing = false;
+    const target = normalizePathInput(draft);
+    if (!target || target.replace(/\/+$/, "") === currentUri.replace(/\/+$/, "")) return;
+    await navigateToPath(target);
+  }
+
+  async function navigateToPath(target) {
+    if (target === TREE_ROOT) { void load(TREE_ROOT); return; }
+    const parts = target.replace(/^s3:\/*/, "").split("/").filter(Boolean);
+    // On a free-roaming connection a single segment can only be a bucket.
+    if (!bucketScoped && parts.length === 1) { void load(`${target}/`); return; }
+    try {
+      const metadata = await invoke("filesystem/stat", { uri: target });
+      await locateFile(target, metadata);
+      return;
+    } catch {
+      // Not an object (or no read access): fall through and treat as folder.
+    }
+    const previousUri = currentUri;
+    const result = await load(`${target}/`);
+    if (result?.exists === false) {
+      // Restore the previous folder first: the restoring load resets the
+      // error banner, so the not-found message has to land after it.
+      if (previousUri !== `${target}/`) await load(previousUri);
+      if (!error) error = text.pathNotFound.replace("{uri}", displayUri(target));
+    }
+  }
+
+  async function locateFile(uri, metadata) {
+    const parent = parentOfUri(uri);
+    await load(parent);
+    let found = entries.find((entry) => sameEntryUri(entry.uri, uri));
+    // The file may sit past the first page; keep appending pages (bounded) so
+    // it can be highlighted and scrolled to in the list.
+    for (let page = 0; !found && nextCursor && page < 25; page += 1) {
+      await load(parent, true);
+      found = entries.find((entry) => sameEntryUri(entry.uri, uri));
+    }
+    if (!found) {
+      // Beyond the page budget: synthesize the entry from the stat metadata so
+      // the preview still opens, even before the list reaches that key.
+      found = { name: baseNameOfUri(uri), uri, kind: "file", size: metadata.size, contentType: metadata.contentType, modifiedAt: metadata.lastModified, etag: metadata.etag };
+    }
+    focusTarget = { uri: found.uri, seq: ++focusSeq };
+    void selectEntry(found);
+  }
+
+  async function runOperation(operation, refreshUri = currentUri) {
+    if (operating) return;
+    operating = true;
+    error = "";
+    try {
+      const result = await operation();
+      // The user may have navigated elsewhere mid-operation (uploads run for
+      // minutes); only reload the folder the operation targeted if it is still
+      // on screen, never yank them back to it.
+      if (currentUri === refreshUri) await load(currentUri);
+      return result;
+    } catch (cause) {
+      error = cause?.name === "AbortError" ? text.uploadCancelled : cause?.message || `${text.operationFailed}: ${String(cause)}`;
+    } finally {
+      operating = false;
+      transfer = null;
+      void refreshOpenTree();
+      // Closed nodes keep their cached children; drop the cache of the folder
+      // this operation touched so a later expansion refetches it.
+      const touched = treeNode(refreshUri);
+      if (touched && !touched.open) touched.loaded = false;
+    }
+  }
+
+  async function createFolder() {
+    contextMenu = null;
+    dialog = { kind: "create-folder", value: "" };
+    dialogOpen = true;
+  }
+
+  function beginUpload() {
+    contextMenu = null;
+    uploadInput?.click();
+  }
+
+  // Files picked through the inputs and files dropped onto the window all
+  // funnel into one confirm dialog: the prefilled "upload to" path can be
+  // edited to any folder, so users never navigate to the target first.
+  function openUploadDialog(files, folder) {
+    if (!files.length || readOnly || operating) return;
+    const totalBytes = files.reduce((sum, file) => sum + file.size, 0);
+    pendingUpload = { files };
+    dialog = { kind: "upload", value: displayUri(uploadTargetDraft(currentUri)), count: files.length, size: totalBytes, folder: folder || files.some((file) => file.webkitRelativePath), error: "" };
+    dialogOpen = true;
+    // The dialog body mounts through a portal; focus lands once it has painted.
+    void tick().then(() => requestAnimationFrame(() => { uploadTargetInput?.focus(); uploadTargetInput?.select(); }));
+  }
+
+  async function uploadFiles(event, folder) {
+    const input = event.currentTarget;
+    const files = [...(input.files || [])];
+    input.value = "";
+    openUploadDialog(files, folder);
+  }
+
+  async function confirmUploadTarget() {
+    const active = dialog;
+    const upload = pendingUpload;
+    if (active?.kind !== "upload" || !upload) return;
+    const uploadUri = resolveUploadTarget(active.value, { bucketScoped, scopedBucket });
+    if (!uploadUri) {
+      active.error = text.uploadTargetRequired;
+      return;
+    }
+    cancelDialog();
+    await uploadItems(upload.files, undefined, uploadUri);
+  }
+
+  async function uploadItems(files, targetForFile, targetBaseUri) {
+    if (!files.length || readOnly || operating) return;
+    notice = "";
+    // Pin the target folder up front: a multi-file upload runs for a while
+    // and later files must land next to the first, not in whatever folder
+    // the user is browsing by then.
+    const uploadUri = targetBaseUri || currentUri;
+    const uploadConnection = connectionId();
+    const uploadInvoke = (method, params, options) => window.dbxPlugin.invoke(method, { ...params, connectionId: uploadConnection, providerId }, options);
+    uploadPanelOpen = true;
+    return runOperation(async () => {
+      const controller = new AbortController();
+      uploadController = controller;
+      uploadSeq += 1;
+      uploadQueue = files.map((file) => ({
+        id: `${uploadSeq}-${file.webkitRelativePath || file.name}`,
+        file,
+        name: file.webkitRelativePath || file.name,
+        targetUri: targetForFile ? targetForFile(file) : uploadTarget(uploadUri, file),
+        status: "pending", sent: 0, confirming: false, error: "", overwrite: false, controller: null,
+      }));
+      transfer = { kind: "upload", name: "", sent: 0, total: uploadQueue.reduce((sum, item) => sum + item.file.size, 0), fileIndex: 0, fileCount: uploadQueue.length };
+      // Same-name conflicts pause whichever worker hit them first; an "all"
+      // answer applies to every remaining conflict, and skipping never
+      // aborts the rest of the batch.
+      let conflictMode = "";
+      let overwriteChain = Promise.resolve();
+      const askOverwrite = (name) => {
+        // Dialogs must not stack, so parallel workers queue up on this chain
+        // and prompt one at a time. A decision made while a prompt sits
+        // queued applies the moment its turn arrives.
+        const asked = overwriteChain.then(() => {
+          if (conflictMode === "skipAll") return "skip";
+          if (conflictMode === "overwriteAll") return "overwrite";
+          return new Promise((resolve) => {
+            dialog = { kind: "overwrite", name, resolve, batch: uploadQueue.length > 1 };
+            dialogOpen = true;
+          });
+        });
+        overwriteChain = asked.then(() => undefined, () => undefined);
+        return asked;
+      };
+      const refreshAggregate = () => {
+        transfer.sent = uploadQueue.reduce((sum, item) => sum + (item.status === "done" || item.status === "skipped" ? item.file.size : Math.min(item.sent, item.file.size)), 0);
+        transfer.fileIndex = uploadQueue.filter((item) => item.status !== "pending" && item.status !== "uploading").length;
+        const active = uploadQueue.find((item) => item.status === "uploading");
+        transfer.name = active ? active.name : "";
+        transfer.confirming = !!active?.confirming;
+      };
+      const upload = (item, overwrite) => uploadFile(item.file, {
+        uri: item.targetUri, invoke: uploadInvoke, overwrite,
+        sendBinary: (channel, bytes) => window.dbxPlugin.sendBinary(channel, bytes),
+        encodeBase64: (bytes) => window.dbxPlugin.encodeBase64(bytes), signal: item.controller.signal,
+        onProgress: (processed, confirming) => { item.sent = processed; item.confirming = confirming; refreshAggregate(); },
+      });
+      const processItem = async (item) => {
+        if (controller.signal.aborted) { item.status = "cancelled"; return; }
+        item.status = "uploading";
+        item.sent = 0;
+        item.controller = new AbortController();
+        const onAbort = () => item.controller.abort();
+        controller.signal.addEventListener("abort", onAbort, { once: true });
+        try {
+          if (item.file.size > inlineUploadBytes && typeof window.dbxPlugin?.sendBinary !== "function") {
+            item.status = "failed";
+            item.error = text.uploadLargeUnavailable;
+            return;
+          }
+          try {
+            await upload(item, item.overwrite);
+            item.status = "done";
+            return;
+          } catch (cause) {
+            const message = cause?.message || String(cause);
+            if (item.controller.signal.aborted) { item.status = "cancelled"; return; }
+            // Versioned buckets swallow same-name uploads as new versions;
+            // everywhere else ask before replacing the existing object.
+            if (!message.startsWith("S3 object already exists")) {
+              item.status = "failed";
+              item.error = message;
+              return;
+            }
+            const decision = conflictMode === "skipAll" ? "skip" : await askOverwrite(item.name);
+            if (decision === "overwriteAll") conflictMode = "overwriteAll";
+            if (decision === "skipAll") conflictMode = "skipAll";
+            if (decision === "skip" || decision === "skipAll" || decision === false) {
+              // A skip choice (or closing the dialog) leaves the existing
+              // object untouched and moves on with the remaining files.
+              item.status = "skipped";
+              return;
+            }
+            item.overwrite = true;
+            await upload(item, true);
+            item.status = "done";
+          }
+        } catch (cause) {
+          item.status = item.controller.signal.aborted ? "cancelled" : "failed";
+          item.error = cause?.message || String(cause);
+        } finally {
+          controller.signal.removeEventListener("abort", onAbort);
+          refreshAggregate();
+        }
+      };
+      try {
+        const queue = uploadQueue;
+        await mapWithConcurrency(queue, 3, processItem);
+        const settled = (status) => uploadQueue.filter((item) => item.status === status).length;
+        const failed = settled("failed");
+        const skipped = settled("skipped");
+        if (failed || skipped) {
+          notice = text.uploadFinished.replace("{done}", String(settled("done"))).replace("{skipped}", String(skipped)).replace("{failed}", String(failed));
+        }
+        if (!failed && !skipped && !controller.signal.aborted) {
+          // Fully successful batches fold the panel away after a beat; any
+          // failure, skip, or cancel keeps it open so row states stay visible.
+          setTimeout(() => { if (uploadQueue === queue) uploadPanelOpen = false; }, 2500);
+        }
+        if (controller.signal.aborted) throw new DOMException("Upload cancelled", "AbortError");
+        return uploadQueue.filter((item) => item.status === "done").map((item) => item.targetUri);
+      } finally {
+        uploadController = undefined;
+      }
+    }, uploadUri);
+  }
+
+  const statusLabel = (item) => {
+    if (item.status === "uploading") return item.confirming ? text.confirmingUpload : `${Math.min(100, Math.floor((item.sent / (item.file.size || 1)) * 100))}%`;
+    return { pending: text.statusPending, done: text.statusDone, failed: text.statusFailed, skipped: text.statusSkipped, cancelled: text.statusCancelled }[item.status] || "";
+  };
+
+  const uploadSummary = () => {
+    const count = (status) => uploadQueue.filter((item) => item.status === status).length;
+    const done = count("done");
+    const failed = count("failed");
+    const skipped = count("skipped");
+    const summary = `${done}/${uploadQueue.length}`;
+    if (!failed && !skipped) return summary;
+    return `${summary} · ${text.statusFailed} ${failed} · ${text.statusSkipped} ${skipped}`;
+  };
+
+  const canDrop = () => !readOnly && !loading && !operating && !(bucketMode && currentUri === "s3:/");
+
+  async function handleDrop(event) {
+    try {
+      const files = await collectDroppedFiles(event.dataTransfer);
+      openUploadDialog(files, false);
+    } catch (cause) {
+      error = cause?.message || String(cause);
+    }
+  }
+
+  async function uploadClipboardImage() {
+    contextMenu = null;
+    if (!window.dbxPlugin?.capabilities?.clipboardImageRead || typeof window.dbxPlugin?.clipboard?.readImage !== "function") {
+      error = text.clipboardUnavailable;
+      return;
+    }
+    error = "";
+    try {
+      const image = await window.dbxPlugin.clipboard.readImage();
+      if (!image?.dataBase64 || image.contentType !== "image/png") throw new Error(text.clipboardEmpty);
+      const relativePath = clipboardImagePath();
+      const fileName = relativePath.split("/").pop();
+      const bytes = decode(image.dataBase64);
+      const file = new File([bytes], fileName, { type: image.contentType });
+      const uploadUri = currentUri;
+      const targetUri = uploadPathTarget(uploadUri, relativePath);
+      const uploaded = await uploadItems([file], () => targetUri);
+      if (!uploaded?.length) return;
+      const shared = await invoke("filesystem/presign", { uri: targetUri, expires: 86400 });
+      const url = shared?.url || "";
+      const markdown = clipboardImageMarkdown(url);
+      const copied = !!url && await copyToClipboard(markdown);
+      dialog = { kind: "clipboard-upload", entry: { name: fileName, uri: targetUri }, url, markdown, copied };
+      dialogOpen = true;
+    } catch (cause) {
+      error = cause?.message || text.clipboardEmpty;
+    }
+  }
+
+  async function showVersions(entry) {
+    contextMenu = null;
+    dialog = { kind: "versions", entry, loading: true, versions: [], error: "" };
+    dialogOpen = true;
+    const currentDialog = dialog;
+    try {
+      const result = await invoke("filesystem/versions", { uri: entry.uri });
+      if (dialog !== currentDialog) return;
+      dialog.versions = result.versions;
+      dialog.truncated = result.truncated;
+    } catch (cause) {
+      if (dialog === currentDialog) dialog.error = cause?.message || text.operationFailed;
+    } finally {
+      if (dialog === currentDialog) dialog.loading = false;
+    }
+  }
+
+  // The details dialog is the second layer for technical metadata (ETag);
+  // selection already fetched it, so the cached copy opens instantly.
+  async function showDetails(entry) {
+    contextMenu = null;
+    const cached = selected?.uri === entry.uri ? entryMetadata : null;
+    dialog = { kind: "details", entry, metadata: cached, loading: !cached };
+    dialogOpen = true;
+    if (cached) return;
+    const currentDialog = dialog;
+    try {
+      const metadata = await invoke("filesystem/stat", { uri: entry.uri });
+      if (dialog === currentDialog) dialog.metadata = metadata;
+    } catch {
+      // The dialog falls back to the listing data below.
+    } finally {
+      if (dialog === currentDialog) dialog.loading = false;
+    }
+  }
+
+  function toggleCheck(entry) {
+    checkedUris = checkedUris.includes(entry.uri) ? checkedUris.filter((uri) => uri !== entry.uri) : [...checkedUris, entry.uri];
+  }
+
+  function toggleCheckAll() {
+    const uris = entries.map((entry) => entry.uri);
+    const allChecked = uris.length > 0 && uris.every((uri) => checkedUris.includes(uri));
+    checkedUris = allChecked ? checkedUris.filter((uri) => !uris.includes(uri)) : [...new Set([...checkedUris, ...uris])];
+  }
+
+  function archiveFileName(uris) {
+    if (uris.length === 1) {
+      const segments = uris[0].replace(/\/+$/, "").split("/").filter(Boolean);
+      const name = decodeURIComponent(segments[segments.length - 1] || "s3");
+      return `${name}.zip`;
+    }
+    return `s3-files-${new Date().toISOString().slice(0, 19).replace(/[-:T]/g, "")}.zip`;
+  }
+
+  function transferPercent() {
+    if (!transfer?.total) return 0;
+    return Math.min(100, Math.floor((transfer.sent / transfer.total) * 100));
+  }
+
+  async function renameEntry(entry) {
+    contextMenu = null;
+    dialog = { kind: "rename", entry, value: entry.name };
+    dialogOpen = true;
+  }
+
+  async function deleteEntry(entry) {
+    contextMenu = null;
+    dialog = { kind: "delete", entry, value: "" };
+    dialogOpen = true;
+  }
+
+  function deleteChecked() {
+    const deletable = entries.filter((entry) => checkedUris.includes(entry.uri) && entry.kind !== "bucket");
+    if (!deletable.length) {
+      error = text.cannotDeleteBucket;
+      return;
+    }
+    dialog = { kind: "delete-batch", count: deletable.length, value: "" };
+    dialogOpen = true;
+  }
+
+  function shareEntry(entry) {
+    contextMenu = null;
+    if (entry.kind === "directory" || entry.kind === "bucket") return;
+    shareCopied = false;
+    shareCopyBlocked = false;
+    dialog = { kind: "share", entry, expires: 86400, url: "", loading: true, shareError: "" };
+    dialogOpen = true;
+    void fetchShareUrl(entry, 86400);
+  }
+
+  async function fetchShareUrl(entry, expires) {
+    const requestId = ++shareRequest;
+    dialog.loading = true;
+    dialog.url = "";
+    dialog.shareError = "";
+    shareCopyBlocked = false;
+    try {
+      const result = await invoke("filesystem/presign", { uri: entry.uri, expires });
+      if (requestId !== shareRequest || dialog?.kind !== "share") return;
+      dialog.loading = false;
+      dialog.url = result?.url || "";
+    } catch (cause) {
+      if (requestId !== shareRequest || dialog?.kind !== "share") return;
+      dialog.loading = false;
+      dialog.shareError = cause?.message || text.shareFailed;
+    }
+  }
+
+  // Clipboard write with the share-dialog fallback chain: the host bridge is
+  // the only path that works in every sandboxed workbench; the async clipboard
+  // API is denied in old sandboxed iframes, and execCommand needs the
+  // selection of a focused, visible input to reach the system clipboard.
+  async function copyToClipboard(value, inputElement) {
+    if (typeof window.dbxPlugin?.copy === "function") {
+      try {
+        await window.dbxPlugin.copy(value);
+        return true;
+      } catch {
+        // fall through to the in-page fallbacks
+      }
+    }
+    try {
+      await navigator.clipboard.writeText(value);
+      return true;
+    } catch {
+      // fall through
+    }
+    inputElement?.focus();
+    inputElement?.select();
+    try {
+      return document.execCommand("copy");
+    } catch {
+      return false;
+    }
+  }
+
+  async function copyShareUrl() {
+    const value = dialog?.url;
+    if (!value) return;
+    const ok = await copyToClipboard(value, shareUrlInput);
+    shareCopied = ok;
+    shareCopyBlocked = !ok;
+    if (ok) setTimeout(() => (shareCopied = false), 2000);
+  }
+
+  function showCopyPath(entry) {
+    contextMenu = null;
+    const absolute = displayUri(entry.uri);
+    const relative = absolute.replace(/^s3:\/\/[^/]+\//, "").replace(/\/+$/, "");
+    dialog = { kind: "copy-path", entry, absolute, relative };
+    dialogOpen = true;
+  }
+
+  async function copyPathValue(which) {
+    if (dialog?.kind !== "copy-path") return;
+    const inputElement = which === "absolute" ? absolutePathInput : relativePathInput;
+    const ok = await copyToClipboard(dialog[which], inputElement);
+    dialog.copied = ok ? which : "";
+    dialog.copyBlocked = !ok;
+    if (ok) setTimeout(() => { if (dialog?.kind === "copy-path") dialog.copied = ""; }, 2000);
+  }
+
+  async function copyClipboardUpload(which) {
+    if (dialog?.kind !== "clipboard-upload") return;
+    const inputElement = which === "url" ? clipboardUrlInput : clipboardMarkdownInput;
+    const ok = await copyToClipboard(dialog[which], inputElement);
+    dialog.copied = ok ? which : "";
+    dialog.copyBlocked = !ok;
+    if (ok) setTimeout(() => { if (dialog?.kind === "clipboard-upload") dialog.copied = ""; }, 2000);
+  }
+
+  function settleOverwrite(decision) {
+    if (dialog?.kind !== "overwrite") return;
+    dialog.resolve?.(decision);
+    dialogOpen = false;
+    dialog = null;
+  }
+
+  function handleDialogOpenChange(open) {
+    dialogOpen = open;
+    if (!open) {
+      settleOverwrite(false);
+      dialog = null;
+      pendingUpload = null;
+    }
+  }
+
+  function cancelDialog() {
+    settleOverwrite(false);
+    dialogOpen = false;
+    dialog = null;
+    pendingUpload = null;
+  }
+
+  function closeContextMenu() {
+    contextMenu = null;
+  }
+
+  async function confirmDialog() {
+    const active = dialog;
+    if (!active || active.kind === "share" || active.kind === "versions" || active.kind === "details" || active.kind === "copy-path" || active.kind === "clipboard-upload" || active.kind === "upload") return;
+    if (active.kind === "overwrite") {
+      active.resolve?.(true);
+      dialogOpen = false;
+      dialog = null;
+      return;
+    }
+    if (active.kind === "delete") {
+      cancelDialog();
+      await runOperation(async () => {
+        await invoke("filesystem/delete", { uri: active.entry.uri, recursive: active.entry.kind === "directory" });
+        checkedUris = checkedUris.filter((uri) => uri !== active.entry.uri);
+        clearPreview();
+      });
+      return;
+    }
+    if (active.kind === "delete-batch") {
+      const targets = entries.filter((entry) => checkedUris.includes(entry.uri) && entry.kind !== "bucket");
+      cancelDialog();
+      await runOperation(async () => {
+        for (const entry of targets) {
+          await invoke("filesystem/delete", { uri: entry.uri, recursive: entry.kind === "directory" });
+        }
+        const deletedUris = new Set(targets.map((entry) => entry.uri));
+        checkedUris = checkedUris.filter((uri) => !deletedUris.has(uri));
+        if (selected && deletedUris.has(selected.uri)) clearPreview();
+      });
+      return;
+    }
+    const name = active.value.trim();
+    if (!name || /[\\/]/.test(name)) {
+      error = text.invalidName;
+      return;
+    }
+    if (active.kind === "rename" && name === active.entry.name) {
+      cancelDialog();
+      return;
+    }
+    cancelDialog();
+    await runOperation(async () => {
+      if (active.kind === "create-folder") {
+        await invoke("filesystem/createDirectory", { uri: childUri(currentUri, name, true) });
+      } else {
+        await invoke("filesystem/rename", { sourceUri: active.entry.uri, targetUri: childUri(parentOfUri(active.entry.uri), name, active.entry.kind === "directory"), overwrite: false });
+      }
+    });
+  }
+
+  function clearPreview() {
+    previewRequest += 1;
+    releasePreviewUrl();
+    void previewReader?.cancel();
+    previewReader = undefined;
+    selected = null;
+    entryMetadata = null;
+    preview = { kind: "empty", value: "", type: "", truncated: false };
+  }
+
+  function releasePreviewUrl() {
+    if (["image", "video", "audio"].includes(preview.kind) && preview.value?.startsWith("blob:")) URL.revokeObjectURL(preview.value);
+    if (previewMediaToken) {
+      const token = previewMediaToken;
+      previewMediaToken = "";
+      const closing = window.dbxPlugin?.media?.close?.(token);
+      void closing?.catch(() => undefined);
+    }
+  }
+
+  function parentUri() {
+    const value = currentUri.replace(/\/$/, "");
+    if (value.startsWith("s3://") && !value.slice(5).includes("/")) return "s3:/";
+    const slash = value.lastIndexOf("/");
+    return slash <= value.indexOf(":") ? "" : `${value.slice(0, slash)}/`;
+  }
+
+  async function saveBytes(fileName, contentType, bytes) {
+    if (typeof window.dbxPlugin.saveFile === "function") {
+      // The sandboxed iframe cannot trigger downloads (WKWebView cancels blob
+      // navigations), so hand the bytes to the host's native save dialog.
+      // A null result means the user dismissed the dialog; stay quiet.
+      return window.dbxPlugin.saveFile({ fileName, contentType }, bytes);
+    }
+    const url = URL.createObjectURL(new Blob([bytes], { type: contentType }));
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = fileName;
+    anchor.click();
+    setTimeout(() => URL.revokeObjectURL(url), 0);
+    return { path: fileName };
+  }
+
+  async function downloadEntry(entry) {
+    contextMenu = null;
+    if (operating || entry.kind === "directory" || entry.kind === "bucket") return;
+    if (entry.size > maxDownloadBytes && !window.dbxPlugin?.capabilities?.downloadFile) {
+      error = text.downloadTooLarge;
+      return;
+    }
+    await runDownload(entry.name, "filesystem/stream/open", { uri: entry.uri, maxBytes: maxDownloadBytes }, entry);
+  }
+
+  async function downloadArchive(uris) {
+    contextMenu = null;
+    if (operating || !uris.length) return;
+    await runDownload(archiveFileName(uris), "filesystem/archive/open", { uris });
+  }
+
+  async function runDownload(fileName, method, params, entry) {
+    const controller = new AbortController();
+    downloadController = controller;
+    operating = true;
+    error = "";
+    transfer = { kind: entry ? "download" : "archive", name: fileName, sent: 0, total: entry?.size || 0, saving: false };
+    try {
+      if (window.dbxPlugin?.capabilities?.downloadFile) {
+        const saved = await saveDownload({
+          host: window.dbxPlugin, fileName, params: { ...params, archive: !entry, connectionId: connectionId(), providerId }, signal: controller.signal,
+          onProgress: ({ sent, total }) => { transfer.sent = sent; transfer.total = total; },
+        });
+        if (!entry && saved) checkedUris = [];
+        return;
+      }
+      if (typeof window.dbxPlugin?.stream !== "function") throw new Error(text.downloadUnavailable);
+      const { bytes, metadata } = await readDownload({
+        open: () => window.dbxPlugin.stream(method, { ...params, connectionId: connectionId(), providerId }, { timeoutMs: 120000 }),
+        signal: controller.signal, tooLarge: entry ? text.downloadTooLarge : text.archiveTooLarge,
+        onMetadata: (metadata) => { transfer.total = metadata.size || transfer.total; },
+        onProgress: (sent) => { transfer.sent = sent; },
+      });
+      if (controller.signal.aborted) return;
+      transfer.saving = true;
+      const saved = await saveBytes(fileName, entry ? normalizedType(entry, metadata) : "application/zip", bytes);
+      if (!entry && saved) checkedUris = [];
+    } catch (cause) {
+      if (!controller.signal.aborted) {
+        const message = cause?.message || "";
+        // The legacy archive path rejects oversize plans in English; surface the
+        // localized copy so the reason and the upgrade path stay readable.
+        error = message.includes("S3 archive exceeds the size limit") ? text.archiveTooLarge : message || `${text.operationFailed}: ${String(cause)}`;
+      }
+    } finally {
+      downloadController = undefined;
+      operating = false;
+      transfer = null;
+    }
+  }
+
+  function startTreeResize(event) {
+    event.preventDefault();
+    const startX = event.clientX;
+    const startWidth = treeWidth;
+    const update = (move) => {
+      treeWidth = Math.round(Math.min(420, Math.max(140, startWidth + (move.clientX - startX))));
+    };
+    const stop = () => {
+      window.removeEventListener("pointermove", update);
+      window.removeEventListener("pointerup", stop);
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+    };
+    document.body.style.cursor = "col-resize";
+    document.body.style.userSelect = "none";
+    window.addEventListener("pointermove", update);
+    window.addEventListener("pointerup", stop, { once: true });
+  }
+
+  function startResize(event) {
+    event.preventDefault();
+    // The list column shares only the space the tree has not claimed, so the
+    // drag delta must map onto that remainder — anchoring to the body width
+    // makes the splitter teleport when the tree panel is visible.
+    const startX = event.clientX;
+    const startPercent = leftWidth;
+    const update = (move) => {
+      const free = Math.max(1, (document.body.clientWidth || 1) - (treeVisible ? treeWidth + 6 : 0) - 6);
+      leftWidth = Math.min(70, Math.max(24, startPercent + ((move.clientX - startX) / free) * 100));
+    };
+    const stop = () => {
+      window.removeEventListener("pointermove", update);
+      window.removeEventListener("pointerup", stop);
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+    };
+    document.body.style.cursor = "col-resize";
+    document.body.style.userSelect = "none";
+    window.addEventListener("pointermove", update);
+    window.addEventListener("pointerup", stop, { once: true });
+  }
+
+  onMount(() => {
+    const unsubscribe = window.dbxPlugin.onContext((value) => { context = value || {}; load("s3:/"); });
+    window.dbxPlugin.ready.then((value) => {
+      context = value || {};
+      text = isZh() ? copy.zh : copy.en;
+      void loadUiPrefs();
+      load("s3:/");
+    });
+    // Dark theming arrives as host CSS variables, not a color-scheme switch;
+    // mirror the appearance so system colors (Canvas/CanvasText, form
+    // controls, scrollbars) follow the theme too.
+    const applyColorScheme = (theme) => {
+      document.documentElement.style.colorScheme = theme?.appearance === "dark" ? "dark" : "light";
+    };
+    applyColorScheme(window.dbxPlugin?.theme);
+    document.addEventListener("dbx-plugin-env", (event) => applyColorScheme(event.detail?.theme));
+    return unsubscribe;
+  });
+
+  onDestroy(() => { clearTimeout(filterTimer); uploadController?.abort(); downloadController?.abort(); releasePreviewUrl(); });
+</script>
+
+<svelte:window onclick={closeContextMenu} oncontextmenu={(event) => event.preventDefault()} onkeydown={(event) => { if (event.key !== "Escape") return; if (contextMenu) { closeContextMenu(); return; } if (!dialogOpen && selected) clearPreview(); }} />
+
+<svelte:head><title>S3</title></svelte:head>
+
+<main ondragenter={(event) => { if (!canDrop() || !event.dataTransfer?.types?.includes("Files")) return; event.preventDefault(); dragDepth += 1; }} ondragover={(event) => { if (canDrop()) event.preventDefault(); }} ondragleave={() => { dragDepth = Math.max(0, dragDepth - 1); }} ondrop={(event) => { dragDepth = 0; if (!canDrop()) return; event.preventDefault(); void handleDrop(event); }}>
+  <div class="toolbar">
+    <div class="path-group">
+      <Button variant="outline" size="icon-sm" aria-pressed={treeVisible} aria-label={text.folderTree} title={text.folderTree} onclick={() => { treeVisible = !treeVisible; saveUiPrefs(); }}><ListTree size={14} /></Button>
+      <Button variant="outline" size="icon-sm" aria-pressed={!previewCollapsed} aria-label={text.previewPane} title={text.previewPane} onclick={() => { previewCollapsed = !previewCollapsed; if (previewCollapsed) releasePreviewUrl(); else if (selected) void selectEntry(selected); saveUiPrefs(); }}><PanelRight size={14} /></Button>
+      <Button variant="outline" size="icon-sm" aria-label={text.up} title={text.up} disabled={!parentUri() || loading} onclick={() => load(parentUri())}><ArrowUp size={14} /></Button>
+      {#if pathEditing}
+        <input aria-label={text.path} bind:value={pathDraft} bind:this={pathInput} onkeydown={(event) => {
+          if (event.key === "Enter") { event.preventDefault(); void commitPathEdit(); }
+          else if (event.key === "Escape") { event.stopPropagation(); cancelPathEdit(); }
+        }} onblur={() => { if (pathEditing) cancelPathEdit(); }} />
+      {:else}
+        <nav class="breadcrumbs" aria-label={text.path} title={text.editPath} ondblclick={(event) => beginPathEdit(event.target.closest(".crumb")?.dataset.uri || currentUri)}>
+          {#each breadcrumbs as crumb, index (crumb.uri)}
+            {#if index > 0}<span class="crumb-sep" aria-hidden="true"><ChevronRight size={12} /></span>{/if}
+            <button type="button" class="crumb" data-uri={crumb.uri} class:current={index === breadcrumbs.length - 1} onclick={() => { pathEditing = false; load(crumb.uri); }}>{crumb.name}</button>
+          {/each}
+        </nav>
+      {/if}
+      <Button variant="ghost" size="icon-sm" class="path-edit" aria-label={text.editPath} title={text.editPath} onmousedown={(event) => event.preventDefault()} onclick={() => (pathEditing ? cancelPathEdit() : beginPathEdit())}><Pencil size={13} /></Button>
+    </div>
+    <div class="toolbar-actions">
+      <label class="filter-box" title={text.filterHint}><Search size={13} /><input aria-label={text.filter} placeholder={text.filter} value={filterQuery} oninput={(event) => scheduleFilter(event.currentTarget.value)} />{#if filterQuery}<button type="button" aria-label={text.clearFilter} title={text.clearFilter} onclick={() => scheduleFilter("")}><X size={12} /></button>{/if}</label>
+      {#if readOnly}<span class="readonly-badge" role="status" title={text.readOnlyTitle}><Lock size={12} />{text.readOnlyMode}</span>{/if}
+      <Button variant="outline" size="icon-sm" aria-label={text.refresh} title={text.refresh} disabled={loading || operating} onclick={() => load(currentUri)}><RefreshCw size={14} /></Button>
+      <Button variant="outline" size="sm" disabled={readOnly || loading || operating || (bucketMode && currentUri === "s3:/")} title={readOnly ? text.readOnlyTitle : undefined} onclick={createFolder}><FolderPlus size={14} />{text.newFolder}</Button>
+      <Button variant="outline" size="sm" disabled={readOnly || loading || operating || (bucketMode && currentUri === "s3:/")} title={readOnly ? text.readOnlyTitle : text.folderUploadHint} onclick={() => folderUploadInput?.click()}><FolderUp size={14} />{text.uploadFolder}</Button>
+      <Button variant="outline" size="sm" disabled={readOnly || loading || operating || (bucketMode && currentUri === "s3:/") || !window.dbxPlugin?.capabilities?.clipboardImageRead} title={!window.dbxPlugin?.capabilities?.clipboardImageRead ? text.clipboardUnavailable : text.clipboardUpload} onclick={uploadClipboardImage}><ClipboardPaste size={14} />{text.clipboardUpload}</Button>
+      <Button size="sm" disabled={readOnly || loading || operating || (bucketMode && currentUri === "s3:/")} title={readOnly ? text.readOnlyTitle : text.versionUploadHint} onclick={beginUpload}><Upload size={14} />{text.upload}</Button>
+      {#if checkedUris.length}<Button variant="outline" size="sm" disabled={loading || operating} title={text.downloadZipCount.replace("{count}", checkedUris.length)} onclick={() => downloadArchive(checkedUris)}><FileArchive size={14} />{text.downloadZipCount.replace("{count}", checkedUris.length)}</Button>{/if}
+      {#if checkedUris.length && !readOnly}<Button variant="destructive" size="sm" disabled={loading || operating} onclick={deleteChecked}><Trash2 size={14} />{text.deleteCount.replace("{count}", checkedUris.length)}</Button>{/if}
+    </div>
+    <input bind:this={uploadInput} hidden type="file" multiple onchange={(event) => uploadFiles(event, false)} />
+    <input bind:this={folderUploadInput} hidden type="file" multiple webkitdirectory onchange={(event) => uploadFiles(event, true)} />
+  </div>
+  {#if transfer}<div class="transfer" role="status" aria-live="polite"><span class="transfer-label">{(transfer.saving ? text.saving : transfer.confirming ? text.confirmingUpload : transfer.kind === "upload" ? text.uploading : text.downloading) + " " + transfer.name}{transfer.fileCount > 1 ? ` (${transfer.fileIndex}/${transfer.fileCount})` : ""}</span><div class="transfer-bar"><div class="transfer-fill" style={`width: ${transferPercent()}%`}></div></div><span class="transfer-percent">{transferPercent()}%</span><Button variant="ghost" size="sm" disabled={transfer.saving} onclick={() => (transfer.kind === "upload" ? uploadController : downloadController)?.abort()}>{text.cancel}</Button></div>{/if}
+  {#if error}<div class="error">{text.error}: {error}</div>{/if}
+  {#if notice}<div class="notice" role="status">{notice}</div>{/if}
+  <section class="split" style={`grid-template-columns: ${treeVisible ? (previewCollapsed ? `${treeWidth}px 6px minmax(220px, 1fr)` : `${treeWidth}px 6px minmax(220px, ${leftWidth}fr) 6px minmax(280px, ${100 - leftWidth}fr)`) : previewCollapsed ? "1fr" : `minmax(240px, ${leftWidth}%) 6px minmax(280px, 1fr)`}`}>
+    {#if treeVisible}
+      <div class="tree-panel"><FolderTree nodes={treeNodes} currentUri={currentUri} {text} rootLabel={text.rootLabel} onToggle={toggleTreeNode} onSelect={selectTreeNode} onLoadMore={continueTrees} /></div>
+      <button class="tree-splitter" aria-label="Resize tree" onpointerdown={startTreeResize}></button>
+    {/if}
+    <ObjectList {entries} {selected} {checkedUris} {loading} {nextCursor} {focusTarget} {text} filterActive={!!filterQuery.trim()} onSelect={selectEntry} onOpen={openEntry} onContextMenu={openContextMenu} onBackgroundContextMenu={(event) => openContextMenu(event, null)} onLoadMore={() => load(currentUri, true)} onToggleCheck={toggleCheck} onToggleCheckAll={toggleCheckAll} />
+    {#if !previewCollapsed}<button class="splitter" aria-label="Resize panels" onpointerdown={startResize}></button>{/if}
+    {#if !previewCollapsed}<PreviewPane {selected} {preview} metadata={entryMetadata} {text} {readOnly} onRename={renameEntry} onDelete={deleteEntry} onDownload={downloadEntry} onShare={shareEntry} onVersions={showVersions} onDetails={showDetails} onSheetChange={(value) => (preview = value)} />{/if}
+  </section>
+  {#if uploadQueue.length && uploadPanelOpen}
+    <aside class="upload-panel" aria-label={text.uploadQueue}>
+      <div class="upload-panel-head">
+        <strong>{text.uploadQueue}</strong>
+        <span class="upload-panel-summary">{uploadSummary()}</span>
+        <Button variant="ghost" size="icon-sm" aria-label={text.close} title={text.close} onclick={() => (uploadPanelOpen = false)}><X size={14} /></Button>
+      </div>
+      <div class="upload-panel-list">
+        {#each uploadQueue as item (item.id)}
+          <div class="upload-row" class:failed={item.status === "failed"} title={item.error || ""}>
+            <span class="upload-row-name">{item.name}</span>
+            <span class="upload-row-status">{statusLabel(item)}</span>
+            {#if item.status === "pending" || item.status === "uploading"}
+              <button type="button" class="upload-row-action" aria-label={text.cancel} title={text.cancel} onclick={() => item.controller?.abort()}>✕</button>
+            {/if}
+          </div>
+        {/each}
+      </div>
+    </aside>
+  {/if}
+  {#if dragDepth > 0}
+    <div class="drop-overlay"><div class="drop-card"><Upload size={22} /><span>{text.dropUpload}</span></div></div>
+  {/if}
+  {#if contextMenu}
+    <div class="context-menu" data-dbx-context-menu role="menu" tabindex="-1" style={`left: ${contextMenu.x}px; top: ${contextMenu.y}px;`} oncontextmenu={(event) => event.preventDefault()}>
+      {#if !contextMenu.entry}
+        <button role="menuitem" disabled={loading || operating} onclick={() => { contextMenu = null; load(currentUri); }}><RefreshCw size={14} />{text.refresh}</button>
+        {#if !readOnly && !(bucketMode && currentUri === "s3:/")}
+          <button role="menuitem" disabled={loading || operating} onclick={createFolder}><FolderPlus size={14} />{text.newFolder}</button>
+          <button role="menuitem" disabled={loading || operating} onclick={beginUpload}><Upload size={14} />{text.upload}</button>
+          <button role="menuitem" disabled={loading || operating} onclick={() => { contextMenu = null; folderUploadInput?.click(); }}><FolderUp size={14} />{text.uploadFolder}</button>
+        {/if}
+      {:else}
+      {#if contextMenu.entry.kind === "file"}<button role="menuitem" onclick={() => showVersions(contextMenu.entry)}><History size={14} />{text.versions}</button>{/if}
+      {#if contextMenu.entry.kind !== "bucket"}<button role="menuitem" onclick={() => showCopyPath(contextMenu.entry)}><Copy size={14} />{text.copyPath}</button>{/if}
+      {#if contextMenu.entry.kind === "directory" || contextMenu.entry.kind === "bucket"}<button role="menuitem" onclick={() => openEntry(contextMenu.entry)}><FolderOpen size={14} />{text.open}</button><button role="menuitem" onclick={() => downloadArchive([contextMenu.entry.uri])}><FileArchive size={14} />{text.downloadZip}</button>{/if}
+      {#if contextMenu.entry.kind !== "directory" && contextMenu.entry.kind !== "bucket"}<button role="menuitem" onclick={() => downloadEntry(contextMenu.entry)}><Download size={14} />{text.download}</button><button role="menuitem" onclick={() => shareEntry(contextMenu.entry)}><Link2 size={14} />{text.share}</button>{/if}
+      {#if contextMenu.entry.kind !== "bucket" && !readOnly}<button role="menuitem" onclick={() => renameEntry(contextMenu.entry)}><Pencil size={14} />{text.rename}</button>{/if}
+      {#if contextMenu.entry.kind !== "bucket" && !readOnly}<button class="danger" role="menuitem" onclick={() => deleteEntry(contextMenu.entry)}><Trash2 size={14} />{text.delete}</button>{/if}
+      {/if}
+    </div>
+  {/if}
+  <Dialog.Root bind:open={dialogOpen} onOpenChange={handleDialogOpenChange}>
+    {#if dialog}
+      <Dialog.Content showCloseButton={false} class={`dialog-content${dialog.kind === "versions" ? " versions-dialog" : ""}`}>
+        <Dialog.Header>
+          <Dialog.Title>{dialog.kind === "versions" ? text.versions : dialog.kind === "details" ? text.details : dialog.kind === "delete" || dialog.kind === "delete-batch" ? text.delete : dialog.kind === "rename" ? text.rename : dialog.kind === "share" ? text.share : dialog.kind === "copy-path" ? text.copyPath : dialog.kind === "clipboard-upload" ? text.clipboardUploaded : dialog.kind === "upload" ? text.upload : dialog.kind === "overwrite" ? text.overwriteTitle : text.newFolder}</Dialog.Title>
+          {#if dialog.kind === "delete"}<Dialog.Description>{text.confirmDelete.replace("{name}", dialog.entry.name)}</Dialog.Description>
+          {:else if dialog.kind === "delete-batch"}<Dialog.Description>{text.confirmDeleteCount.replace("{count}", dialog.count)}</Dialog.Description>
+          {:else if dialog.kind === "overwrite"}<Dialog.Description>{text.confirmOverwrite.replace("{name}", dialog.name)}</Dialog.Description>
+          {:else if dialog.kind === "upload"}<Dialog.Description>{text.selectedFiles.replace("{count}", dialog.count).replace("{size}", formatObjectSize(dialog.size, text.locale))}{#if dialog.folder} · {text.uploadFolder}{/if}</Dialog.Description>
+          {:else if dialog.kind === "share" || dialog.kind === "versions" || dialog.kind === "details" || dialog.kind === "copy-path" || dialog.kind === "clipboard-upload"}<Dialog.Description>{dialog.entry.name}</Dialog.Description>{/if}
+        </Dialog.Header>
+        {#if dialog.kind === "share"}
+          <label class="dialog-field">{text.shareExpires}
+            <select value={dialog.expires} onchange={(event) => fetchShareUrl(dialog.entry, Number(event.currentTarget.value))}>
+              {#each shareExpiryOptions as option (option.value)}<option value={option.value}>{option.label}</option>{/each}
+            </select>
+          </label>
+          <div class="share-url">
+            <input bind:this={shareUrlInput} readonly spellcheck="false" aria-label={text.share} value={dialog.loading ? text.loading : dialog.url} onclick={(event) => event.currentTarget.select()} onkeydown={(event) => event.key === "Enter" && copyShareUrl()} />
+            {#if dialog.shareError}<div class="share-error">{dialog.shareError}</div>{/if}
+            {#if shareCopyBlocked && dialog.url}<div class="share-hint">{text.copyBlocked}</div>{/if}
+          </div>
+        {:else if dialog.kind === "versions"}
+          <div class="versions-list">
+            {#if dialog.loading}<p>{text.loading}</p>
+            {:else if dialog.error}<p class="share-error">{dialog.error}</p>
+            {:else if !dialog.versions.length}<p>{text.noVersions}</p>
+            {:else}{#each dialog.versions as version}
+              <div class="version-row"><code>{version.versionId || "null"}</code><div class="version-meta"><time>{new Date(version.modified).toLocaleString()}</time><span>{version.size.toLocaleString()} B</span>{#if version.isLatest}<strong>{text.latestVersion}</strong>{/if}{#if version.deleteMarker}<strong>{text.deletedVersion}</strong>{/if}</div></div>
+            {/each}{/if}
+          </div>
+          {#if dialog.truncated}<p class="share-hint">{text.versionsTruncated}</p>{/if}
+        {:else if dialog.kind === "details"}
+          {@const detail = { size: dialog.metadata?.size ?? dialog.entry.size, type: dialog.metadata?.contentType || dialog.entry.contentType || "", modified: dialog.metadata?.lastModified || dialog.entry.modifiedAt || "", etag: dialog.metadata?.etag || "" }}
+          {#if dialog.loading}<p class="share-hint">{text.loading}</p>
+          {:else}
+            <dl class="details-list">
+              <div><dt>{text.size}</dt><dd title={Number.isFinite(detail.size) ? `${detail.size.toLocaleString(text.locale)} B` : ""}>{Number.isFinite(detail.size) ? formatObjectSize(detail.size, text.locale) : "—"}</dd></div>
+              <div><dt>{text.type}</dt><dd class="detail-mono" title={detail.type}>{detail.type || "—"}</dd></div>
+              <div><dt>{text.modified}</dt><dd title={text.modifiedHint}>{detail.modified ? formatObjectModified(detail.modified, text.locale) : "—"}</dd></div>
+              <div><dt>ETag</dt><dd class="detail-mono" title={detail.etag}>{detail.etag || "—"}</dd></div>
+            </dl>
+          {/if}
+        {:else if dialog.kind === "copy-path"}
+          <div class="copy-path-rows">
+            <div class="copy-path-row">
+              <span class="copy-path-label">{text.absolutePath}</span>
+              <input bind:this={absolutePathInput} readonly spellcheck="false" aria-label={text.absolutePath} value={dialog.absolute} onclick={(event) => event.currentTarget.select()} onkeydown={(event) => event.key === "Enter" && copyPathValue("absolute")} />
+              <Button variant="outline" size="sm" onclick={() => copyPathValue("absolute")}>{dialog.copied === "absolute" ? text.copied : text.copyLabel}</Button>
+            </div>
+            <div class="copy-path-row">
+              <span class="copy-path-label">{text.relativePath}</span>
+              <input bind:this={relativePathInput} readonly spellcheck="false" aria-label={text.relativePath} value={dialog.relative} onclick={(event) => event.currentTarget.select()} onkeydown={(event) => event.key === "Enter" && copyPathValue("relative")} />
+              <Button variant="outline" size="sm" onclick={() => copyPathValue("relative")}>{dialog.copied === "relative" ? text.copied : text.copyLabel}</Button>
+            </div>
+            {#if dialog.copyBlocked}<div class="share-hint">{text.copyBlocked}</div>{/if}
+          </div>
+        {:else if dialog.kind === "clipboard-upload"}
+          <div class="copy-path-rows">
+            <div class="copy-path-row">
+              <span class="copy-path-label">URL</span>
+              <input bind:this={clipboardUrlInput} readonly spellcheck="false" aria-label="URL" value={dialog.url} onclick={(event) => event.currentTarget.select()} onkeydown={(event) => event.key === "Enter" && copyClipboardUpload("url")} />
+              <Button variant="outline" size="sm" onclick={() => copyClipboardUpload("url")}>{dialog.copied === "url" ? text.copied : text.copyLabel}</Button>
+            </div>
+            <div class="copy-path-row">
+              <span class="copy-path-label">{text.clipboardMarkdown}</span>
+              <input bind:this={clipboardMarkdownInput} readonly spellcheck="false" aria-label={text.clipboardMarkdown} value={dialog.markdown} onclick={(event) => event.currentTarget.select()} onkeydown={(event) => event.key === "Enter" && copyClipboardUpload("markdown")} />
+              <Button variant="outline" size="sm" onclick={() => copyClipboardUpload("markdown")}>{dialog.copied === "markdown" ? text.copied : text.copyLabel}</Button>
+            </div>
+            <div class="share-hint">{text.clipboardLinkExpires}</div>
+            {#if dialog.copyBlocked}<div class="share-hint">{text.copyBlocked}</div>{/if}
+          </div>
+        {:else if dialog.kind === "upload"}
+          {#if dialog.folder}<p class="share-hint">{text.folderUploadHint}</p>{/if}
+          <label class="dialog-field">{text.uploadTo}<input bind:this={uploadTargetInput} bind:value={dialog.value} spellcheck="false" aria-label={text.uploadTo} onkeydown={(event) => { if (event.key === "Enter") { event.preventDefault(); void confirmUploadTarget(); } }} /></label>
+          <p class="share-hint">{text.uploadTargetHint}</p>
+          {#if dialog.error}<div class="share-error">{dialog.error}</div>{/if}
+        {:else if dialog.kind === "overwrite"}
+          <p class="share-hint">{text.confirmOverwriteHint}</p>
+        {:else if dialog.kind !== "delete" && dialog.kind !== "delete-batch"}
+          <label class="dialog-field">{dialog.kind === "rename" ? text.newName : text.folderName}<input bind:value={dialog.value} onkeydown={(event) => event.key === "Enter" && confirmDialog()} /></label>
+        {/if}
+        <Dialog.Footer class="dialog-actions">
+          {#if dialog.kind === "share"}
+            <Button disabled={!dialog.url} onclick={copyShareUrl}>{shareCopied ? text.copied : text.copy}</Button>
+          {:else if dialog.kind === "versions"}
+            <Button variant="outline" onclick={cancelDialog}>{text.close}</Button>
+          {:else if dialog.kind === "details"}
+            <Button onclick={cancelDialog}>{text.close}</Button>
+          {:else if dialog.kind === "copy-path"}
+            <Button variant="outline" onclick={cancelDialog}>{text.close}</Button>
+          {:else if dialog.kind === "clipboard-upload"}
+            <Button onclick={cancelDialog}>{text.close}</Button>
+          {:else if dialog.kind === "overwrite"}
+            {#if dialog.batch}
+              <Button variant="outline" size="sm" onclick={() => settleOverwrite("skip")}>{text.skipFile}</Button>
+              <Button variant="outline" size="sm" onclick={() => settleOverwrite("skipAll")}>{text.skipAll}</Button>
+              <Button variant="outline" size="sm" onclick={() => settleOverwrite("overwriteAll")}>{text.overwriteAll}</Button>
+              <Button variant="destructive" size="sm" onclick={() => settleOverwrite("overwrite")}>{text.overwrite}</Button>
+            {:else}
+              <Button variant="outline" onclick={cancelDialog}>{text.cancel}</Button>
+              <Button variant="destructive" onclick={confirmDialog}>{text.overwrite}</Button>
+            {/if}
+          {:else if dialog.kind === "upload"}
+            <Button variant="outline" onclick={cancelDialog}>{text.cancel}</Button>
+            <Button onclick={confirmUploadTarget}><Upload size={14} />{text.upload}</Button>
+          {:else}
+            <Button variant={dialog.kind === "delete" || dialog.kind === "delete-batch" ? "destructive" : "default"} onclick={confirmDialog}>{dialog.kind === "delete" || dialog.kind === "delete-batch" ? text.delete : text.confirm}</Button>
+          {/if}
+        </Dialog.Footer>
+      </Dialog.Content>
+    {/if}
+  </Dialog.Root>
+</main>
+
+<style>
+  :global(*) { box-sizing: border-box; }
+  :global(body) { margin: 0; min-width: 720px; min-height: 100vh; color: CanvasText; background: Canvas; font-family: Inter, ui-sans-serif, system-ui, sans-serif; }
+  main { min-height: 100vh; display: flex; flex-direction: column; padding: 22px 26px; background: Canvas; }
+  .toolbar { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 0; }
+  .path-group, .toolbar-actions { display: flex; align-items: center; gap: 4px; }
+  .path-group { min-width: 0; flex: 1; padding: 2px; border: 1px solid color-mix(in srgb, CanvasText 10%, transparent); border-radius: 5px; background: color-mix(in srgb, CanvasText 2%, transparent); }
+  .toolbar input { min-width: 0; flex: 1; height: 30px; border: 1px solid color-mix(in srgb, CanvasText 14%, transparent); border-radius: 4px; padding: 6px 9px; color: inherit; background: color-mix(in srgb, CanvasText 4%, transparent); font: 12px ui-monospace, monospace; outline: none; }
+  .filter-box { display: flex; align-items: center; gap: 5px; width: min(220px, 22vw); min-width: 140px; height: 30px; padding: 0 7px; color: var(--color-muted-foreground, color-mix(in srgb, CanvasText 55%, transparent)); border: 1px solid var(--color-border, color-mix(in srgb, CanvasText 14%, transparent)); border-radius: 5px; background: var(--color-background, Canvas); }
+  .filter-box input { width: 100%; height: auto; padding: 0; border: 0; background: transparent; font-family: inherit; }
+  .filter-box input:focus { border: 0; }
+  .filter-box button { display: grid; flex: 0 0 auto; place-items: center; width: 18px; height: 18px; padding: 0; color: inherit; border: 0; border-radius: 4px; background: transparent; }
+  .filter-box button:hover { color: var(--color-foreground, CanvasText); background: var(--color-muted, color-mix(in srgb, CanvasText 7%, transparent)); }
+  .toolbar input:focus { border-color: var(--color-primary, #6d5dfc); box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-primary, #6d5dfc) 18%, transparent); }
+  .breadcrumbs { display: flex; flex: 1; align-items: center; min-width: 0; overflow-x: auto; scrollbar-width: none; white-space: nowrap; -webkit-user-select: none; user-select: none; }
+  .breadcrumbs::-webkit-scrollbar { display: none; }
+  .crumb { flex: 0 0 auto; max-width: 220px; padding: 4px 7px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--color-muted-foreground, color-mix(in srgb, CanvasText 55%, transparent)); border: 0; border-radius: 5px; background: transparent; font: 12px ui-monospace, monospace; cursor: pointer; }
+  .crumb:hover { color: var(--color-foreground, CanvasText); background: color-mix(in srgb, CanvasText 6%, transparent); }
+  .crumb.current { color: var(--color-foreground, CanvasText); font-weight: 600; background: color-mix(in srgb, CanvasText 5%, transparent); }
+  .crumb-sep { display: grid; flex: 0 0 auto; place-items: center; color: color-mix(in srgb, CanvasText 30%, transparent); }
+  .path-edit { flex: 0 0 auto; }
+  .readonly-badge { display: inline-flex; align-items: center; gap: 5px; flex: 0 0 auto; height: 26px; padding: 0 10px; color: var(--color-destructive, #dc2626); border: 1px solid color-mix(in srgb, var(--color-destructive, #dc2626) 35%, transparent); border-radius: 13px; background: color-mix(in srgb, var(--color-destructive, #dc2626) 8%, transparent); font-size: 12px; font-weight: 500; }
+  .tree-panel { min-height: 0; min-width: 0; overflow: hidden; background: var(--color-background, Canvas); }
+  .tree-splitter { position: relative; width: 6px; height: 100%; padding: 0; border: 0; border-radius: 0; background: transparent; cursor: col-resize; }
+  .tree-splitter::after { content: ""; position: absolute; top: 0; bottom: 0; left: calc(50% - 0.5px); width: 1px; background: var(--color-border, color-mix(in srgb, CanvasText 11%, transparent)); }
+  .tree-splitter:hover { background: color-mix(in srgb, var(--color-primary, #6d5dfc) 22%, transparent); }
+  .tree-splitter:hover::after { background: var(--color-primary, #6d5dfc); }
+  .error { margin: 8px 0; padding: 10px; border: 1px solid #d44a4a66; border-radius: 8px; color: #d44a4a; font-size: 12px; }
+  .transfer { display: flex; align-items: center; gap: 10px; margin: 8px 0; padding: 8px 12px; border: 1px solid var(--color-border, color-mix(in srgb, CanvasText 12%, transparent)); border-radius: 8px; font-size: 12px; }
+  .transfer-label { min-width: 0; max-width: 46%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .transfer-bar { flex: 1; height: 6px; overflow: hidden; border-radius: 3px; background: color-mix(in srgb, CanvasText 10%, transparent); }
+  .transfer-fill { height: 100%; border-radius: 3px; background: var(--color-primary, #6d5dfc); transition: width 150ms ease; }
+  .transfer-percent { flex: 0 0 auto; min-width: 34px; text-align: right; color: var(--color-muted-foreground, color-mix(in srgb, CanvasText 55%, transparent)); font-variant-numeric: tabular-nums; }
+  .split { display: grid; min-height: 0; flex: 1; overflow: hidden; border: 1px solid color-mix(in srgb, CanvasText 12%, transparent); border-radius: 6px; box-shadow: 0 1px 3px color-mix(in srgb, CanvasText 7%, transparent); }
+  .splitter { position: relative; width: 6px; height: 100%; padding: 0; border-radius: 0; background: transparent; cursor: col-resize; }
+  .splitter::after { content: ""; position: absolute; top: 0; bottom: 0; left: calc(50% - 0.5px); width: 1px; background: var(--color-border, color-mix(in srgb, CanvasText 11%, transparent)); }
+  .splitter:hover { background: color-mix(in srgb, var(--color-primary, #6d5dfc) 22%, transparent); }
+  .splitter:hover::after { background: var(--color-primary, #6d5dfc); }
+  :global(html), :global(body), :global(#app) { height: 100%; overflow: hidden; }
+  :global(body) { min-width: 0; color: var(--color-foreground, CanvasText); background: var(--color-background, Canvas); }
+  main { height: 100%; min-height: 0; gap: 8px; padding: 10px 12px; background: var(--color-background, Canvas); }
+  .toolbar { min-height: 32px; padding: 0; border: 0; background: transparent; }
+  .path-group { border-color: var(--color-border, color-mix(in srgb, CanvasText 10%, transparent)); background: var(--color-background, Canvas); }
+  .toolbar input { border-color: var(--color-border, color-mix(in srgb, CanvasText 14%, transparent)); background: var(--color-background, Canvas); }
+  .split { border-color: var(--color-border, color-mix(in srgb, CanvasText 12%, transparent)); border-radius: 6px; background: var(--color-background, Canvas); }
+  :global(.dialog-content) { width: min(360px, 100%); }
+  :global(.versions-dialog) { width: min(640px, 100%); }
+  .versions-list { max-height: 50vh; overflow: auto; font-size: 12px; }
+  .version-row { padding: 12px 0; border-bottom: 1px solid var(--color-border, #8884); }
+  .version-row code { display: block; overflow-wrap: anywhere; user-select: text; }
+  .version-meta { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 6px; color: var(--color-muted-foreground, #888); font-size: 11px; }
+  .version-meta strong { color: var(--color-primary, #6d5dfc); font-weight: 500; }
+  .dialog-field { display: grid; gap: 6px; color: var(--color-foreground, CanvasText); font-size: 12px; }
+  .dialog-field input, .dialog-field select, .share-url input { width: 100%; padding: 8px 10px; color: var(--color-foreground, CanvasText); border: 1px solid var(--color-border, color-mix(in srgb, CanvasText 18%, transparent)); border-radius: var(--radius-md, 6px); outline: none; background: var(--color-muted, color-mix(in srgb, CanvasText 5%, transparent)); font: inherit; }
+  .dialog-field select { appearance: auto; cursor: pointer; }
+  .dialog-field input:focus, .dialog-field select:focus, .share-url input:focus { border-color: var(--color-primary, #6d5dfc); }
+  .share-url { display: grid; gap: 6px; margin-top: 12px; }
+  .share-url input { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: text; font: 11px/1.4 ui-monospace, monospace; }
+  .share-error { color: var(--color-destructive, #dc2626); font-size: 12px; }
+  .details-list { display: grid; gap: 10px; margin: 4px 0 0; font-size: 12px; }
+  .details-list div { display: grid; grid-template-columns: 84px minmax(0, 1fr); gap: 12px; align-items: baseline; }
+  .details-list dt { color: var(--color-muted-foreground, color-mix(in srgb, CanvasText 55%, transparent)); }
+  .details-list dd { margin: 0; min-width: 0; overflow-wrap: anywhere; user-select: text; font-variant-numeric: tabular-nums; }
+  .details-list .detail-mono { font-family: ui-monospace, monospace; font-size: 11px; }
+  .share-hint { color: var(--color-muted-foreground, color-mix(in srgb, CanvasText 55%, transparent)); font-size: 12px; }
+  .copy-path-rows { display: grid; gap: 10px; margin-top: 12px; }
+  .copy-path-row { display: grid; grid-template-columns: minmax(72px, auto) minmax(0, 1fr) auto; align-items: center; gap: 8px; }
+  .copy-path-label { color: var(--color-muted-foreground, color-mix(in srgb, CanvasText 55%, transparent)); font-size: 12px; }
+  .copy-path-row input { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 6px 9px; color: var(--color-foreground, CanvasText); border: 1px solid var(--color-border, color-mix(in srgb, CanvasText 18%, transparent)); border-radius: var(--radius-md, 6px); outline: none; background: var(--color-muted, color-mix(in srgb, CanvasText 5%, transparent)); cursor: text; font: 11px/1.4 ui-monospace, monospace; }
+  .copy-path-row input:focus { border-color: var(--color-primary, #6d5dfc); }
+  :global(.dialog-actions) { display: flex; justify-content: flex-end; gap: 8px; margin-top: 18px; }
+  .context-menu { position: fixed; z-index: 9999; min-width: 160px; width: max-content; max-width: calc(100vw - 16px); padding: 4px; overflow-y: auto; border: 1px solid color-mix(in srgb, var(--color-foreground, CanvasText) 10%, transparent); border-radius: 6px; background: var(--color-popover, var(--color-background, Canvas)); color: var(--color-popover-foreground, var(--color-foreground, CanvasText)); box-shadow: 0 12px 32px color-mix(in srgb, CanvasText 18%, transparent); }
+  .context-menu button { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 24px; padding: 4px 8px; color: inherit; border: 0; border-radius: 6px; background: transparent; text-align: left; font-size: 13px; line-height: 16px; cursor: default; }
+  .context-menu button:disabled { opacity: .45; pointer-events: none; }
+  .context-menu button:hover, .context-menu button:focus-visible { color: var(--color-accent-foreground, var(--color-foreground, CanvasText)); background: var(--color-accent, var(--color-muted, color-mix(in srgb, CanvasText 7%, transparent))); outline: none; }
+  .context-menu button.danger { color: var(--color-destructive, #dc2626); }
+  .context-menu button.danger:hover, .context-menu button.danger:focus-visible { color: var(--color-destructive, #dc2626); background: color-mix(in srgb, var(--color-destructive, #dc2626) 10%, transparent); }
+  .notice { margin: 8px 0; padding: 10px; border: 1px solid color-mix(in srgb, var(--color-primary, #6d5dfc) 35%, transparent); border-radius: 8px; color: var(--color-foreground, CanvasText); font-size: 12px; }
+  .drop-overlay { position: fixed; z-index: 500; inset: 0; display: grid; place-items: center; background: color-mix(in srgb, Canvas 60%, transparent); }
+  .drop-card { display: flex; align-items: center; gap: 10px; padding: 18px 26px; border: 2px dashed var(--color-primary, #6d5dfc); border-radius: 12px; color: var(--color-foreground, CanvasText); background: var(--color-background, Canvas); font-size: 14px; }
+  .upload-panel { position: fixed; z-index: 400; right: 14px; bottom: 14px; width: min(380px, calc(100vw - 28px)); max-height: 46vh; display: flex; flex-direction: column; overflow: hidden; border: 1px solid var(--color-border, color-mix(in srgb, CanvasText 14%, transparent)); border-radius: 10px; background: var(--color-background, Canvas); box-shadow: 0 12px 32px color-mix(in srgb, CanvasText 20%, transparent); }
+  .upload-panel-head { display: flex; align-items: center; gap: 8px; padding: 6px 8px 6px 12px; border-bottom: 1px solid var(--color-border, color-mix(in srgb, CanvasText 12%, transparent)); font-size: 12px; }
+  .upload-panel-head strong { flex: 0 0 auto; font-weight: 600; }
+  .upload-panel-summary { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: right; color: var(--color-muted-foreground, color-mix(in srgb, CanvasText 55%, transparent)); font-variant-numeric: tabular-nums; }
+  .upload-panel-list { overflow-y: auto; padding: 4px; }
+  .upload-row { display: flex; align-items: center; gap: 8px; padding: 4px 6px; border-radius: 6px; font-size: 12px; }
+  .upload-row-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; direction: rtl; text-align: left; }
+  .upload-row-status { flex: 0 0 auto; color: var(--color-muted-foreground, color-mix(in srgb, CanvasText 55%, transparent)); font-variant-numeric: tabular-nums; }
+  .upload-row.failed .upload-row-status { color: var(--color-destructive, #dc2626); }
+  .upload-row-action { flex: 0 0 auto; display: grid; place-items: center; width: 18px; height: 18px; padding: 0; color: inherit; border: 0; border-radius: 4px; background: transparent; cursor: pointer; }
+  .upload-row-action:hover { background: color-mix(in srgb, CanvasText 8%, transparent); }
+</style>
