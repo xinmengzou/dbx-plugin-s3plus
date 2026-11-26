@@ -22,6 +22,19 @@ type s3Stream struct {
 	maxBytes     int64
 }
 
+// resolveStreamMaxBytes 解析流式下载的容量上限:未指定时用 maxStreamBytes(8 GiB 硬顶)。
+// 老宿主(内存缓冲下载)由前端按能力传 256MiB,Sidecar 不再单独压低。
+func resolveStreamMaxBytes(values map[string]any) (int64, *dbxpluginsdk.PluginError) {
+	maxBytes := int64(numberValue(values["maxBytes"]))
+	if maxBytes <= 0 {
+		maxBytes = maxStreamBytes
+	}
+	if maxBytes > maxStreamBytes {
+		return 0, invalidParams("S3 stream exceeds the 8 GiB limit")
+	}
+	return maxBytes, nil
+}
+
 func (plugin *plugin) openStream(values map[string]any, emitter *dbxpluginsdk.Emitter) (any, *dbxpluginsdk.PluginError) {
 	if emitter == nil {
 		return nil, remoteError("S3 streaming is unavailable")
@@ -38,12 +51,9 @@ func (plugin *plugin) openStream(values map[string]any, emitter *dbxpluginsdk.Em
 	if pluginError != nil || path.key == "" || strings.HasSuffix(path.key, "/") {
 		return nil, invalidParams("S3 stream requires a file URI")
 	}
-	maxBytes := int64(numberValue(values["maxBytes"]))
-	if maxBytes <= 0 {
-		maxBytes = maxStreamBytes
-	}
-	if maxBytes > maxStreamBytes {
-		return nil, invalidParams("S3 stream exceeds the 256 MiB limit")
+	maxBytes, pluginError := resolveStreamMaxBytes(values)
+	if pluginError != nil {
+		return nil, pluginError
 	}
 	streamContext, cancel := context.WithCancel(context.Background())
 	remotePath := connection.remotePath(path)

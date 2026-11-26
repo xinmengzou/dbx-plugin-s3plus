@@ -1,4 +1,6 @@
 export const maxDownloadBytes = 256 * 1024 * 1024;
+// 流式落盘宿主(downloadFile 能力)不再受内存缓冲约束,上限由 Sidecar 硬顶(8 GiB)兜底
+export const maxStreamDownloadBytes = 8 * 1024 * 1024 * 1024;
 
 export async function saveDownload({ host, fileName, params, signal, onProgress = () => {} }) {
   if (signal?.aborted) return null;

@@ -9,7 +9,7 @@
   import { collectDroppedFiles } from "./lib/drag-drop.js";
   import { mapWithConcurrency } from "./lib/concurrency.js";
   import { clipboardImageMarkdown, clipboardImagePath } from "./lib/clipboard-image.js";
-  import { maxDownloadBytes, readDownload, saveDownload } from "./lib/downloads.js";
+  import { maxDownloadBytes, maxStreamDownloadBytes, readDownload, saveDownload } from "./lib/downloads.js";
   import { formatObjectModified, formatObjectSize, prettyJsonText, sortEntriesDirectoryFirst } from "./lib/object-metadata.js";
   import { TREE_ROOT, baseNameOfUri, displayUri, normalizePathInput as normalizePathInputFrom, parentOfUri, sameEntryUri } from "./lib/path-navigation.js";
   import { ArrowUp, ChevronRight, ClipboardPaste, Copy, Download, FileArchive, FolderOpen, FolderPlus, FolderUp, History, Info, Link2, ListTree, Lock, PanelRight, Pencil, RefreshCw, Search, Trash2, Upload, X } from "@lucide/svelte";
@@ -27,7 +27,7 @@
     en: {
       locale: "en", size: "Size", modified: "Last modified", modifiedHint: "S3 last-modified time (upload or overwrite), shown in local time.", saving: "Saving",
       title: "S3 object browser", path: "Path", refresh: "Refresh", up: "Up", open: "Open", empty: "This folder is empty.",
-      loading: "Loading objects…", preview: "Preview", noSelection: "Select an object to preview it.", binary: "This object cannot be previewed.", previewTooLarge: "This object is too large to preview here.", downloadTooLarge: "The current DBX host buffers downloads in memory, so files are capped at 256 MiB. A newer DBX host streams to disk with no size limit.", downloadUnavailable: "Downloads require a newer DBX host.", uploadLargeUnavailable: "Large uploads require a newer DBX host.", archiveTooLarge: "The current DBX host buffers ZIP downloads in memory, so source data is capped at 220 MiB. A newer DBX host streams with no limit.", uploading: "Uploading", downloading: "Downloading", downloadZip: "Download as ZIP", downloadZipCount: "ZIP {count} items",
+      loading: "Loading objects…", preview: "Preview", noSelection: "Select an object to preview it.", binary: "This object cannot be previewed.", previewTooLarge: "This object is too large to preview here.", downloadTooLarge: "The current DBX host buffers downloads in memory, so files are capped at 256 MiB. A newer DBX host streams to disk with no size limit.", downloadTooLargeStreaming: "Streaming downloads are capped at 8 GiB per file.", downloadUnavailable: "Downloads require a newer DBX host.", uploadLargeUnavailable: "Large uploads require a newer DBX host.", archiveTooLarge: "The current DBX host buffers ZIP downloads in memory, so source data is capped at 220 MiB. A newer DBX host streams with no limit.", uploading: "Uploading", downloading: "Downloading", downloadZip: "Download as ZIP", downloadZipCount: "ZIP {count} items",
       truncated: "Preview is truncated.", error: "Error", connection: "Connection", type: "Type",
       markdown: "Markdown", word: "Word document", spreadsheet: "Spreadsheet", sheet: "Sheet", noSheets: "No worksheets found.", noConnection: "No connection", file: "File", folder: "Folder", newFolder: "New folder", upload: "Upload", download: "Download", rename: "Rename", delete: "Delete", deleteCount: "Delete {count} items", confirm: "Confirm", cancel: "Cancel", folderName: "Folder name", newName: "New name", confirmDelete: "Delete {name}?", confirmDeleteCount: "Delete {count} items? This cannot be undone.", cannotDeleteBucket: "Buckets cannot be deleted from here.", invalidName: "Enter a valid name.", uploadLimit: "Files must be 4 MiB or smaller.", operationFailed: "Operation failed",
       share: "Share", shareExpires: "Link validity", shareExpiresHour: "1 hour", shareExpiresDay: "24 hours", shareExpiresWeek: "7 days", copy: "Copy link", copied: "Copied", copyBlocked: "Auto-copy was blocked — the link is selected, press ⌘C / Ctrl+C to copy.", shareFailed: "Could not create the share link.",
@@ -45,7 +45,7 @@
     zh: {
       locale: "zh-CN", size: "大小", modified: "修改时间", modifiedHint: "S3 最后修改时间（上传或覆盖），按本地时区显示。", saving: "正在保存",
       title: "S3 对象浏览器", path: "路径", refresh: "刷新", up: "上级", open: "打开", empty: "此目录为空。",
-      loading: "正在加载对象…", preview: "预览", noSelection: "选择一个对象以预览。", binary: "此对象无法预览。", previewTooLarge: "对象过大，已跳过预览。", downloadTooLarge: "当前 DBX 版本需要把下载完整读入内存，因此上限为 256 MiB；升级到更新版本的 DBX 后会自动改为流式落盘，不再有大小限制。", downloadUnavailable: "当前 DBX 宿主不支持下载。", uploadLargeUnavailable: "当前 DBX 宿主不支持大文件上传。", archiveTooLarge: "当前 DBX 版本需要把打包结果完整读入内存，因此源数据上限为 220 MiB；升级到更新版本的 DBX 后会自动解除限制。", uploading: "正在上传", downloading: "正在下载", downloadZip: "下载为 ZIP", downloadZipCount: "打包 {count} 项",
+      loading: "正在加载对象…", preview: "预览", noSelection: "选择一个对象以预览。", binary: "此对象无法预览。", previewTooLarge: "对象过大，已跳过预览。", downloadTooLarge: "当前 DBX 版本需要把下载完整读入内存，因此上限为 256 MiB；升级到更新版本的 DBX 后会自动改为流式落盘，不再有大小限制。", downloadTooLargeStreaming: "流式下载单文件上限为 8 GiB。", downloadUnavailable: "当前 DBX 宿主不支持下载。", uploadLargeUnavailable: "当前 DBX 宿主不支持大文件上传。", archiveTooLarge: "当前 DBX 版本需要把打包结果完整读入内存，因此源数据上限为 220 MiB；升级到更新版本的 DBX 后会自动解除限制。", uploading: "正在上传", downloading: "正在下载", downloadZip: "下载为 ZIP", downloadZipCount: "打包 {count} 项",
       truncated: "预览内容已截断。", error: "错误", connection: "连接", type: "类型",
       markdown: "Markdown", word: "Word 文档", spreadsheet: "电子表格", sheet: "工作表", noSheets: "未找到工作表。", noConnection: "未连接", file: "文件", folder: "文件夹", newFolder: "新建文件夹", upload: "上传", download: "下载", rename: "重命名", delete: "删除", deleteCount: "删除 {count} 项", confirm: "确定", cancel: "取消", folderName: "文件夹名称", newName: "新名称", confirmDelete: "确定删除 {name} 吗？", confirmDeleteCount: "确定删除 {count} 项吗？删除后无法恢复。", cannotDeleteBucket: "不支持在此删除存储桶。", invalidName: "请输入有效名称。", uploadLimit: "文件不能超过 4 MiB。", operationFailed: "操作失败",
       share: "分享", shareExpires: "链接有效期", shareExpiresHour: "1 小时", shareExpiresDay: "24 小时", shareExpiresWeek: "7 天", copy: "复制链接", copied: "已复制", copyBlocked: "自动复制被拦截,已全选链接,请按 ⌘C / Ctrl+C 复制。", shareFailed: "生成分享链接失败。",
@@ -1105,11 +1105,14 @@
   async function downloadEntry(entry) {
     contextMenu = null;
     if (operating || entry.kind === "directory" || entry.kind === "bucket") return;
-    if (entry.size > maxDownloadBytes && !window.dbxPlugin?.capabilities?.downloadFile) {
-      error = text.downloadTooLarge;
+    // 老宿主把下载完整缓冲进内存,保持 256 MiB;流式落盘宿主(downloadFile)放开到 Sidecar 硬顶 8 GiB
+    const streamingHost = !!window.dbxPlugin?.capabilities?.downloadFile;
+    const downloadCap = streamingHost ? maxStreamDownloadBytes : maxDownloadBytes;
+    if (entry.size > downloadCap) {
+      error = streamingHost ? text.downloadTooLargeStreaming : text.downloadTooLarge;
       return;
     }
-    await runDownload(entry.name, "filesystem/stream/open", { uri: entry.uri, maxBytes: maxDownloadBytes }, entry);
+    await runDownload(entry.name, "filesystem/stream/open", { uri: entry.uri, maxBytes: downloadCap }, entry);
   }
 
   async function downloadArchive(uris) {

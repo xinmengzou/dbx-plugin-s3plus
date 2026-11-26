@@ -15,7 +15,7 @@ const (
 	filesystemProvider   = "io.github.xinmengzou.s3plus.files"
 	maxInlineBytes       = 4 * 1024 * 1024
 	streamChunkBytes     = 256 * 1024
-	maxStreamBytes       = 256 * 1024 * 1024
+	maxStreamBytes       = 8 * 1024 * 1024 * 1024 // 流式下载硬顶;老宿主由前端按能力保持 256MiB
 	maxMediaChunkBytes   = 2 * 1024 * 1024
 	defaultPageSize      = 200
 	maxPageSize          = 1000

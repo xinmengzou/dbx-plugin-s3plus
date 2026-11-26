@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"io"
+	"strings"
 	"testing"
 	"time"
 )
@@ -56,5 +57,31 @@ func TestCloseStreamDoesNotCancelOtherDownloads(test *testing.T) {
 	}
 	if firstContext.Err() != context.Canceled || secondContext.Err() != nil || plugin.streams["second"] == nil {
 		test.Fatal("cancelling one download affected another stream")
+	}
+}
+
+func TestResolveStreamMaxBytes(test *testing.T) {
+	// 未指定 → 默认硬顶 8 GiB
+	got, pluginError := resolveStreamMaxBytes(map[string]any{})
+	if pluginError != nil {
+		test.Fatal(pluginError)
+	}
+	if got != maxStreamBytes {
+		test.Fatalf("default mismatch: %d", got)
+	}
+	// 新宿主流式落盘:300 MiB 请求应被接受(墙已放开)
+	got, pluginError = resolveStreamMaxBytes(map[string]any{"maxBytes": float64(300 * 1024 * 1024)})
+	if pluginError != nil || got != 300*1024*1024 {
+		test.Fatalf("300 MiB rejected: %d %v", got, pluginError)
+	}
+	// 超过硬顶 → 拒绝
+	_, pluginError = resolveStreamMaxBytes(map[string]any{"maxBytes": float64(9 * 1024 * 1024 * 1024)})
+	if pluginError == nil || !strings.Contains(pluginError.Message, "8 GiB") {
+		test.Fatalf("9 GiB should exceed limit: %v", pluginError)
+	}
+	// 负数/非法 → 回退默认
+	got, pluginError = resolveStreamMaxBytes(map[string]any{"maxBytes": float64(-5)})
+	if pluginError != nil || got != maxStreamBytes {
+		test.Fatalf("negative should fall back to default: %d %v", got, pluginError)
 	}
 }
