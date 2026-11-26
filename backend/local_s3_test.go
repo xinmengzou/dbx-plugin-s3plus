@@ -318,3 +318,85 @@ func TestLocalS3StatReportsObjectMetadata(test *testing.T) {
 		test.Fatal("stat accepted a directory URI")
 	}
 }
+
+func TestLocalS3BucketInfo(test *testing.T) {
+	endpoint := os.Getenv("DBX_S3_LOCAL_ENDPOINT")
+	if endpoint == "" {
+		test.Skip("set DBX_S3_LOCAL_ENDPOINT to an isolated local MinIO server")
+	}
+	if !strings.HasPrefix(endpoint, "127.0.0.1:") {
+		test.Fatal("local S3 tests only accept an isolated loopback endpoint")
+	}
+	client, err := minio.New(endpoint, &minio.Options{Creds: credentials.NewStaticV4(os.Getenv("DBX_S3_LOCAL_ACCESS_KEY"), os.Getenv("DBX_S3_LOCAL_SECRET_KEY"), ""), Region: "us-east-1", BucketLookup: minio.BucketLookupPath, MaxRetries: 1})
+	if err != nil {
+		test.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	bucket := fmt.Sprintf("dbx-info-test-%d", time.Now().UnixNano())
+	if err := client.MakeBucket(ctx, bucket, minio.MakeBucketOptions{}); err != nil {
+		test.Fatal(err)
+	}
+	test.Cleanup(func() {
+		cleanup, stop := context.WithTimeout(context.Background(), time.Minute)
+		defer stop()
+		if err := client.RemoveBucket(cleanup, bucket); err != nil {
+			test.Error(err)
+		}
+	})
+	connection := &s3Connection{client: client, bucket: bucket, basePath: "tenant"}
+	instance := &plugin{connections: map[string]*s3Connection{"local": connection}}
+	uri := objectURI(bucket, "资料/info.bin")
+
+	// 未配置状态:versioning Off,其余能力 unconfigured
+	info, pluginError := instance.bucketInfo(map[string]any{"connectionId": "local", "uri": uri})
+	if pluginError != nil {
+		test.Fatal(pluginError)
+	}
+	fields := info.(map[string]any)
+	if fields["bucket"] != bucket {
+		test.Fatalf("bucket mismatch: %#v", fields["bucket"])
+	}
+	versioning := fields["versioning"].(bucketCapability)
+	if versioning.Status != bucketCapOK || versioning.Detail != "Off" {
+		test.Fatalf("default versioning mismatch: %#v", versioning)
+	}
+	for _, capability := range []string{"policy", "encryption", "lifecycle", "cors"} {
+		got := fields[capability].(bucketCapability)
+		if got.Status != bucketCapUnconfigured {
+			test.Fatalf("fresh bucket %s mismatch: %#v", capability, got)
+		}
+	}
+
+	// 配置 policy + versioning 后:对应能力转 ok,其余保持 unconfigured
+	policy := fmt.Sprintf(`{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Action":["s3:GetObject"],"Resource":["arn:aws:s3:::%s/*"]}]}`, bucket)
+	if err := client.SetBucketPolicy(ctx, bucket, policy); err != nil {
+		test.Fatal(err)
+	}
+	if err := client.SetBucketVersioning(ctx, bucket, minio.BucketVersioningConfiguration{Status: "Enabled"}); err != nil {
+		test.Fatal(err)
+	}
+	configured, pluginError := instance.bucketInfo(map[string]any{"connectionId": "local", "uri": uri})
+	if pluginError != nil {
+		test.Fatal(pluginError)
+	}
+	configuredFields := configured.(map[string]any)
+	if got := configuredFields["versioning"].(bucketCapability); got.Status != bucketCapOK || got.Detail != "Enabled" {
+		test.Fatalf("enabled versioning mismatch: %#v", got)
+	}
+	if got := configuredFields["policy"].(bucketCapability); got.Status != bucketCapOK || got.Detail != "1 statements (1 allow / 0 deny)" {
+		test.Fatalf("policy summary mismatch: %#v", got)
+	}
+	for _, capability := range []string{"encryption", "lifecycle", "cors"} {
+		got := configuredFields[capability].(bucketCapability)
+		if got.Status != bucketCapUnconfigured {
+			test.Fatalf("unconfigured %s drifted: %#v", capability, got)
+		}
+	}
+
+	// 无连接桶且 URI 为空 → 明确报错
+	unscoped := &plugin{connections: map[string]*s3Connection{"local": {client: client}}}
+	if _, pluginError := unscoped.bucketInfo(map[string]any{"connectionId": "local", "uri": ""}); pluginError == nil {
+		test.Fatal("empty bucket info request should fail")
+	}
+}

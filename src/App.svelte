@@ -12,7 +12,7 @@
   import { maxDownloadBytes, readDownload, saveDownload } from "./lib/downloads.js";
   import { formatObjectModified, formatObjectSize, prettyJsonText, sortEntriesDirectoryFirst } from "./lib/object-metadata.js";
   import { TREE_ROOT, baseNameOfUri, displayUri, normalizePathInput as normalizePathInputFrom, parentOfUri, sameEntryUri } from "./lib/path-navigation.js";
-  import { ArrowUp, ChevronRight, ClipboardPaste, Copy, Download, FileArchive, FolderOpen, FolderPlus, FolderUp, History, Link2, ListTree, Lock, PanelRight, Pencil, RefreshCw, Search, Trash2, Upload, X } from "@lucide/svelte";
+  import { ArrowUp, ChevronRight, ClipboardPaste, Copy, Download, FileArchive, FolderOpen, FolderPlus, FolderUp, History, Info, Link2, ListTree, Lock, PanelRight, Pencil, RefreshCw, Search, Trash2, Upload, X } from "@lucide/svelte";
   // The host inlines only the top-level script into the sandbox document, so
   // dynamic imports resolve against tauri.localhost and 404; preview parsers
   // must ship inside the main bundle.
@@ -35,6 +35,9 @@
       filter: "Search by prefix", filterHint: "Search the current folder only: match folders and files by name prefix (bucket names at the root list), e.g. docs/2024/report. Case-sensitive; navigating to another folder clears the search.", noMatch: "No files match this prefix.", clearFilter: "Clear filter", clipboardUpload: "Upload clipboard image", clipboardUnavailable: "Clipboard image upload requires a newer DBX desktop host.", clipboardEmpty: "The clipboard does not contain an image.", clipboardUploaded: "Clipboard image uploaded", clipboardMarkdown: "Markdown", clipboardLinkExpires: "The generated link is valid for 24 hours.",
       copyPath: "Copy path", copyLabel: "Copy", absolutePath: "Absolute path", relativePath: "Relative path (without bucket)", overwriteTitle: "Overwrite file", confirmOverwrite: "{name} already exists. Overwrite it?", confirmOverwriteHint: "Unless the bucket has versioning enabled, the previous content is replaced and cannot be restored.", overwrite: "Overwrite",
       readOnlyMode: "Read-only", readOnlyTitle: "This connection is marked read-only in DBX; uploads, deletes, renames, and folder creation are disabled.",
+      bucketInfo: "Bucket info", bucketInfoTitle: "Bucket info", bucketInfoLoading: "Loading…", bucketInfoFailed: "Failed to load bucket info",
+      capVersioning: "Versioning", capPolicy: "Policy", capEncryption: "Encryption", capLifecycle: "Lifecycle", capCors: "CORS",
+      capOK: "configured", capUnconfigured: "not configured", capUnsupported: "not supported by provider", capError: "error",
       uploadFolder: "Upload folder", folderUploadHint: "Preserves the selected folder and nested files. Empty folders are omitted by the browser.", uploadCancelled: "Upload cancelled. Completed files are kept.", confirmingUpload: "Waiting for storage confirmation…", versions: "Versions", noVersions: "No versions found.", latestVersion: "Latest", deletedVersion: "Delete marker", versionsTruncated: "Showing the first 1,000 versions.", versionUploadHint: "Same-name uploads create a new version when bucket versioning is enabled; otherwise you will be asked whether to overwrite.",
       dropUpload: "Drop files or folders here to upload", overwriteAll: "Overwrite all", skipFile: "Skip", skipAll: "Skip all", uploadQueue: "Upload queue", uploadFinished: "Upload finished: {done} succeeded, {skipped} skipped, {failed} failed.", statusPending: "Pending", statusDone: "Done", statusFailed: "Failed", statusSkipped: "Skipped", statusCancelled: "Cancelled",
       uploadTo: "Upload to", selectedFiles: "{count} files · {size}", uploadTargetRequired: "Enter a target path starting with the bucket name.", uploadTargetHint: "Missing folders are created automatically, so the path may point anywhere in the bucket.",
@@ -50,6 +53,9 @@
       filter: "按前缀搜索", filterHint: "只搜索当前文件夹：按名称前缀匹配文件夹和文件（桶列表页匹配桶名），例如输入 docs/2024/report。区分大小写，切换目录时自动清除。", noMatch: "没有匹配该前缀的文件。", clearFilter: "清除筛选", clipboardUpload: "上传剪贴板图片", clipboardUnavailable: "剪贴板图片上传需要更新版本的 DBX 桌面端。", clipboardEmpty: "剪贴板中没有图片。", clipboardUploaded: "剪贴板图片已上传", clipboardMarkdown: "Markdown", clipboardLinkExpires: "生成的链接有效期为 24 小时。",
       copyPath: "复制路径", copyLabel: "复制", absolutePath: "绝对路径", relativePath: "相对路径（不含桶）", overwriteTitle: "覆盖文件", confirmOverwrite: "文件「{name}」已存在，确定覆盖吗？", confirmOverwriteHint: "桶未开启版本管理时，覆盖后原内容无法恢复。", overwrite: "覆盖",
       readOnlyMode: "只读", readOnlyTitle: "此连接已在 DBX 中标记为只读，上传、删除、重命名和新建文件夹已被禁用。",
+      bucketInfo: "桶信息", bucketInfoTitle: "桶信息", bucketInfoLoading: "加载中…", bucketInfoFailed: "桶信息加载失败",
+      capVersioning: "版本控制", capPolicy: "策略", capEncryption: "加密", capLifecycle: "生命周期", capCors: "CORS",
+      capOK: "已配置", capUnconfigured: "未配置", capUnsupported: "厂商不支持", capError: "错误",
       uploadFolder: "上传文件夹", folderUploadHint: "保留所选文件夹及嵌套文件的路径。浏览器不会包含空文件夹。", uploadCancelled: "上传已取消，已完成的文件会保留。", confirmingUpload: "等待存储服务确认…", versions: "版本历史", noVersions: "未找到历史版本。", latestVersion: "最新", deletedVersion: "删除标记", versionsTruncated: "仅显示前 1,000 个版本。", versionUploadHint: "同名上传在存储桶启用版本管理时自动创建新版本，否则会询问是否覆盖。",
       dropUpload: "松开鼠标，上传文件或文件夹", overwriteAll: "全部覆盖", skipFile: "跳过", skipAll: "全部跳过", uploadQueue: "上传队列", uploadFinished: "上传完成：成功 {done} 个，跳过 {skipped} 个，失败 {failed} 个。", statusPending: "等待中", statusDone: "完成", statusFailed: "失败", statusSkipped: "已跳过", statusCancelled: "已取消",
       uploadTo: "上传至", selectedFiles: "{count} 个文件 · {size}", uploadTargetRequired: "请输入以桶名开头的目标路径。", uploadTargetHint: "目录不存在时会自动创建，可填写桶内任意路径。",
@@ -60,6 +66,25 @@
   let context = $state({});
   let entries = $state([]);
   let currentUri = $state("s3:/");
+
+
+  // ==== 桶信息(只读,连接/桶级探测;② 桶管理只读面) ====
+  let bucketInfoOpen = $state(false);
+  let bucketInfoData = $state(null);
+  let bucketInfoError = $state("");
+  const bucketInfoRows = [["versioning", "capVersioning"], ["policy", "capPolicy"], ["encryption", "capEncryption"], ["lifecycle", "capLifecycle"], ["cors", "capCors"]];
+  const capStatusLabel = (status) => (status === "ok" ? text.capOK : status === "unconfigured" ? text.capUnconfigured : status === "unsupported" ? text.capUnsupported : text.capError);
+  async function showBucketInfo() {
+    bucketInfoOpen = true;
+    bucketInfoData = null;
+    bucketInfoError = "";
+    try {
+      bucketInfoData = await window.dbxPlugin.invoke("filesystem/bucket/info", { uri: currentUri, connectionId: connectionId(), providerId });
+    } catch (e) {
+      bucketInfoError = e?.message || String(e);
+    }
+  }
+  // ==== 桶信息 END ====
   let nextCursor = $state("");
   let bucketMode = $state(false);
   let readOnly = $state(false);
@@ -1227,6 +1252,7 @@
       {#if readOnly}<span class="readonly-badge" role="status" title={text.readOnlyTitle}><Lock size={12} />{text.readOnlyMode}</span>{/if}
       <Button variant="outline" size="icon-sm" aria-label={text.refresh} title={text.refresh} disabled={loading || operating} onclick={() => load(currentUri)}><RefreshCw size={14} /></Button>
       <Button variant="outline" size="sm" disabled={readOnly || loading || operating || (bucketMode && currentUri === "s3:/")} title={readOnly ? text.readOnlyTitle : undefined} onclick={createFolder}><FolderPlus size={14} />{text.newFolder}</Button>
+      {#if !bucketMode || currentUri !== "s3:/"}<Button variant="outline" size="sm" disabled={loading || operating} title={text.bucketInfo} onclick={showBucketInfo}><Info size={14} />{text.bucketInfo}</Button>{/if}
       <Button variant="outline" size="sm" disabled={readOnly || loading || operating || (bucketMode && currentUri === "s3:/")} title={readOnly ? text.readOnlyTitle : text.folderUploadHint} onclick={() => folderUploadInput?.click()}><FolderUp size={14} />{text.uploadFolder}</Button>
       <Button variant="outline" size="sm" disabled={readOnly || loading || operating || (bucketMode && currentUri === "s3:/") || !window.dbxPlugin?.capabilities?.clipboardImageRead} title={!window.dbxPlugin?.capabilities?.clipboardImageRead ? text.clipboardUnavailable : text.clipboardUpload} onclick={uploadClipboardImage}><ClipboardPaste size={14} />{text.clipboardUpload}</Button>
       <Button size="sm" disabled={readOnly || loading || operating || (bucketMode && currentUri === "s3:/")} title={readOnly ? text.readOnlyTitle : text.versionUploadHint} onclick={beginUpload}><Upload size={14} />{text.upload}</Button>
@@ -1248,6 +1274,34 @@
     {#if !previewCollapsed}<button class="splitter" aria-label="Resize panels" onpointerdown={startResize}></button>{/if}
     {#if !previewCollapsed}<PreviewPane {selected} {preview} metadata={entryMetadata} {text} {readOnly} onRename={renameEntry} onDelete={deleteEntry} onDownload={downloadEntry} onShare={shareEntry} onVersions={showVersions} onDetails={showDetails} onSheetChange={(value) => (preview = value)} />{/if}
   </section>
+  <Dialog.Root open={bucketInfoOpen} onOpenChange={(v) => (bucketInfoOpen = v)}>
+    {#if bucketInfoOpen}
+    <Dialog.Content class="dialog-content">
+      <Dialog.Header>
+        <Dialog.Title>{text.bucketInfoTitle}</Dialog.Title>
+        <Dialog.Description>{bucketInfoData ? bucketInfoData.bucket : text.bucketInfoLoading}</Dialog.Description>
+      </Dialog.Header>
+      {#if bucketInfoError}
+        <p class="error">{text.bucketInfoFailed}: {bucketInfoError}</p>
+      {:else if !bucketInfoData}
+        <p>{text.bucketInfoLoading}</p>
+      {:else}
+        <table style="width:100%;font-size:13px;border-collapse:collapse">
+          <tbody>
+            {#each bucketInfoRows as [key, labelKey]}
+              {@const cap = bucketInfoData[key] || {}}
+              <tr style="border-top:1px solid var(--border,#333)">
+                <td style="padding:6px 10px;color:var(--muted-foreground,#aaa);white-space:nowrap">{text[labelKey]}</td>
+                <td style="padding:6px 10px">{cap.status === "ok" ? cap.detail : capStatusLabel(cap.status)}</td>
+              </tr>
+            {/each}
+          </tbody>
+        </table>
+      {/if}
+      <Dialog.Footer><Button variant="outline" onclick={() => (bucketInfoOpen = false)}>{text.close}</Button></Dialog.Footer>
+    </Dialog.Content>
+    {/if}
+  </Dialog.Root>
   {#if uploadQueue.length && uploadPanelOpen}
     <aside class="upload-panel" aria-label={text.uploadQueue}>
       <div class="upload-panel-head">

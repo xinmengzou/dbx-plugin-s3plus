@@ -96,6 +96,11 @@ func (plugin *plugin) Handle(
 			return nil, pluginError
 		}
 		return plugin.disconnect(connectionID)
+	case "filesystem/bucket/info":
+		if pluginError := requireFilesystemProvider(values); pluginError != nil {
+			return nil, pluginError
+		}
+		return plugin.bucketInfo(values)
 	case "filesystem/list":
 		if pluginError := requireFilesystemProvider(values); pluginError != nil {
 			return nil, pluginError
