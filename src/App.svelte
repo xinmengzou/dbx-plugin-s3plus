@@ -67,6 +67,65 @@
   let entries = $state([]);
   let currentUri = $state("s3:/");
 
+  // ==== SPIKE(仅本地 dev;连接名含 "Spike" 自动运行;不提交) ====
+  let spikeLog = $state("");
+  let spikeRan = false;
+  const SPIKE_SIZE = 36 * 1024 * 1024;
+  function spikeBlob(tag) {
+    const arr = new Uint8Array(SPIKE_SIZE);
+    for (let i = 0; i < arr.length; i += 65536) {
+      crypto.getRandomValues(arr.subarray(i, Math.min(i + 65536, arr.length)));
+    }
+    return new File([arr], `spike-${tag}.bin`, { type: "application/octet-stream" });
+  }
+  async function spikeUploadOne(file, label, timeline) {
+    const invoke = (method, params, options) => window.dbxPlugin.invoke(method, { ...params, connectionId: connectionId(), providerId }, options);
+    const started = performance.now();
+    const result = await uploadFile(file, {
+      uri: spikeTarget(file.name), invoke, overwrite: true,
+      sendBinary: (channel, bytes) => window.dbxPlugin.sendBinary(channel, bytes),
+      encodeBase64: (bytes) => window.dbxPlugin.encodeBase64(bytes),
+      signal: new AbortController().signal,
+      onProgress: () => timeline.push(`${label}@${performance.now() - started | 0}`),
+    });
+    return { ms: performance.now() - started, result };
+  }
+  function spikeTarget(name) { return "s3://spike-bucket/" + name; }
+  async function spikeRunAll() {
+    if (spikeRan) return;
+    spikeRan = true;
+    spikeLog = "SPIKE running...";
+    try {
+      await new Promise((r) => setTimeout(r, 2500));
+      const t1 = [], t2 = [], t3 = [], t4 = [];
+      const w0 = performance.now();
+      const r1 = await spikeUploadOne(spikeBlob("seq-1"), "f1", t1);
+      const r2 = await spikeUploadOne(spikeBlob("seq-2"), "f2", t2);
+      const seqWall = performance.now() - w0;
+      const w1 = performance.now();
+      const [r3, r4] = await Promise.all([
+        spikeUploadOne(spikeBlob("par-1"), "f3", t3),
+        spikeUploadOne(spikeBlob("par-2"), "f4", t4),
+      ]);
+      const parWall = performance.now() - w1;
+      spikeLog = `SPIKE_RESULT SEQ f1=${r1.ms | 0}ms f2=${r2.ms | 0}ms wall=${seqWall | 0}ms | PAR f3=${r3.ms | 0}ms f4=${r4.ms | 0}ms wall=${parWall | 0}ms | SPEEDUP=${(seqWall / parWall).toFixed(2)}x`;
+      // 顺带验证 filesystem/bucket/info(与桶信息按钮同链路)
+      try {
+        const info = await window.dbxPlugin.invoke("filesystem/bucket/info", { uri: "s3://spike-bucket/", connectionId: connectionId(), providerId });
+        spikeLog += ` | BUCKET_INFO ${JSON.stringify(info)}`;
+      } catch (e) {
+        spikeLog += ` | BUCKET_INFO_ERROR ${e?.message || String(e)}`;
+      }
+    } catch (e) {
+      spikeLog = "SPIKE_ERROR: " + (e?.message || String(e));
+    }
+  }
+  $effect(() => {
+    if (!spikeRan && context?.connectionId) {
+      spikeRunAll();
+    }
+  });
+  // ==== SPIKE END ====
 
   // ==== 桶信息(只读,连接/桶级探测;② 桶管理只读面) ====
   let bucketInfoOpen = $state(false);
@@ -1305,6 +1364,11 @@
     </Dialog.Content>
     {/if}
   </Dialog.Root>
+  {#if spikeLog}
+  <div style="position:fixed;right:12px;bottom:12px;z-index:9999;background:#111;color:#0f0;padding:10px;font:12px/1.6 monospace;border:1px solid #0f0;max-width:520px;pointer-events:none">
+    <pre style="white-space:pre-wrap;margin:0">{spikeLog}</pre>
+  </div>
+  {/if}
   {#if uploadQueue.length && uploadPanelOpen}
     <aside class="upload-panel" aria-label={text.uploadQueue}>
       <div class="upload-panel-head">
