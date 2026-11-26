@@ -11,7 +11,7 @@ import (
 
 const (
 	pluginID             = "io.github.xinmengzou.s3plus"
-	pluginVersion        = "0.2.0"
+	pluginVersion        = "0.2.1"
 	filesystemProvider   = "io.github.xinmengzou.s3plus.files"
 	maxInlineBytes       = 4 * 1024 * 1024
 	streamChunkBytes     = 256 * 1024

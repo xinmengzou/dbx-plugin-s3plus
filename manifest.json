@@ -3,7 +3,7 @@
   "manifest_version": 1,
   "id": "io.github.xinmengzou.s3plus",
   "name": "S3 Browser Plus",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "publisher": "xinmengzou",
   "description": "S3-compatible object storage plugin for DBX.",
   "source": "https://github.com/xinmengzou/dbx-plugin-s3plus",

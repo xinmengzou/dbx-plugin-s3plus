@@ -1,0 +1,13 @@
+S3 Browser Plus
+Copyright 2026 xinmengzou
+
+This product includes software derived from S3 Browser
+(https://github.com/t8y2/dbx-plugin-s3), Copyright t8y2,
+licensed under the Apache License, Version 2.0.
+
+Modifications by the S3 Browser Plus community fork (xinmengzou and
+contributors): upload experience enhancements (drag-and-drop uploads with
+target-directory picker, batch conflict strategies, concurrent upload queue
+panel), preview pane improvements with persisted layout, connection form
+enhancements with provider endpoint examples, plugin identity change, and
+ongoing maintenance.

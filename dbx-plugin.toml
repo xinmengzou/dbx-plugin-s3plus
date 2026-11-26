@@ -6,7 +6,7 @@ directory = "backend"
 binary = "dbx-plugin-s3plus"
 
 [package]
-include = ["assets", "ui"]
+include = ["assets", "ui", "LICENSE", "NOTICE"]
 
 [dev]
 ui_build = ["npm", "run", "build"]

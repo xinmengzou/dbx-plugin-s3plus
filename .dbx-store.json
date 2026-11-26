@@ -2,12 +2,22 @@
   "name": "S3 Browser Plus",
   "description": "S3-compatible object storage plugin for DBX, a community fork of S3 Browser with upload, preview, and connection-form enhancements.",
   "icon": "assets/plugin.svg",
-  "tags": ["s3", "storage", "files", "object-storage"],
-  "permissions": ["host.events", "host.binary", "host.clipboard:read", "host.storage"],
+  "tags": [
+    "s3",
+    "storage",
+    "files",
+    "object-storage"
+  ],
+  "permissions": [
+    "host.events",
+    "host.binary",
+    "host.clipboard:read",
+    "host.storage"
+  ],
   "source": "https://github.com/xinmengzou/dbx-plugin-s3plus",
   "homepage": "https://github.com/xinmengzou/dbx-plugin-s3plus",
   "license": "Apache-2.0",
-  "releaseNotes": "Initial release of S3 Browser Plus, a fork of S3 Browser (io.github.t8y2.s3, Apache-2.0): drag-and-drop uploads with target-directory picker, batch conflict strategies, 3-way concurrent upload queue panel, collapsible preview pane with persisted layout, server-side prefix search, and provider endpoint examples in the connection form.",
+  "releaseNotes": "Initial release of S3 Browser Plus, a fork of S3 Browser (io.github.t8y2.s3, Apache-2.0): drag-and-drop uploads with target-directory picker, batch conflict strategies, 3-way concurrent upload queue panel, collapsible preview pane with persisted layout, server-side prefix search, and provider endpoint examples in the connection form. This release also bundles LICENSE and NOTICE files inside the package for Apache-2.0 attribution and distribution compliance.",
   "localizations": {
     "zh-CN": {
       "name": "S3 Browser Plus",
